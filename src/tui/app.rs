@@ -253,6 +253,81 @@ pub struct Hits {
     pub overlay: Rect,
     /// The rows of the status menu or of the settings, one row for each item.
     pub rows: Rect,
+    /// The text of the chat or of the details, which a mouse drag selects.
+    pub text: Rect,
+}
+
+/// A text selection with the mouse, from the cell `anchor` to the cell `head`.
+/// The selection includes both cells, and the rows between them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TextSel {
+    pub anchor: Position,
+    pub head: Position,
+}
+
+impl TextSel {
+    /// The first and the last cell of the selection, in reading order.
+    fn ordered(self) -> (Position, Position) {
+        let (a, b) = (self.anchor, self.head);
+        if (a.y, a.x) <= (b.y, b.x) {
+            (a, b)
+        } else {
+            (b, a)
+        }
+    }
+
+    pub fn contains(self, p: Position) -> bool {
+        let (a, b) = self.ordered();
+        (a.y, a.x) <= (p.y, p.x) && (p.y, p.x) <= (b.y, b.x)
+    }
+}
+
+/// The position in `r` that is nearest to `p`.
+fn clamp_to(p: Position, r: Rect) -> Position {
+    Position::new(
+        p.x.min(r.right().saturating_sub(1)).max(r.x),
+        p.y.min(r.bottom().saturating_sub(1)).max(r.y),
+    )
+}
+
+/// The text of the cells `from..to` of a row of the chat. The borders of a
+/// message box and the space after its left border are not text.
+fn row_text(cells: &[String], from: usize, to: usize) -> String {
+    let is_box = |s: &str| {
+        s.chars()
+            .next()
+            .is_some_and(|c| ('\u{2500}'..='\u{257f}').contains(&c))
+    };
+    let mut keep = vec![true; cells.len()];
+    let edge = matches!(
+        cells.first().map(String::as_str),
+        Some("┌" | "┏" | "└" | "┗")
+    );
+    if edge {
+        for (k, c) in keep.iter_mut().zip(cells) {
+            *k = !is_box(c);
+        }
+    } else if matches!(cells.first().map(String::as_str), Some("│" | "┃")) {
+        keep[0] = false;
+        if cells.get(1).is_some_and(|c| c == " ") {
+            keep[1] = false;
+        }
+        if let Some(last) = cells.iter().rposition(|c| !c.trim().is_empty())
+            && last > 0
+            && is_box(&cells[last])
+        {
+            keep[last] = false;
+        }
+    }
+    let text: String = (from..to.min(cells.len()))
+        .filter(|&i| keep[i])
+        .map(|i| cells[i].as_str())
+        .collect();
+    if edge {
+        text.trim().to_string()
+    } else {
+        text.trim_end().to_string()
+    }
 }
 
 /// Work that needs the terminal, and runs between two frames.
@@ -306,6 +381,13 @@ pub struct App {
     pub hits: Hits,
     /// True while the user drags the border of the task list.
     dragging: bool,
+    /// The text selection in the chat or in the details.
+    pub text_sel: Option<TextSel>,
+    /// True while the user drags a text selection.
+    selecting: bool,
+    /// The symbols of the cells of `hits.text`, one row for each screen row, as
+    /// drawn last. A cell under a wide character has an empty symbol.
+    pub text_cells: Vec<Vec<String>>,
     /// The status of each task at the last reload. `None` before the first load.
     statuses: Option<HashMap<u32, Status>>,
     /// The tasks whose status the human changed in this TUI. The next reload
@@ -350,6 +432,9 @@ impl App {
             list_drawn: 0,
             hits: Hits::default(),
             dragging: false,
+            text_sel: None,
+            selecting: false,
+            text_cells: Vec::new(),
             statuses: None,
             own_changes: HashSet::new(),
             notifier: desktop::send,
@@ -567,18 +652,36 @@ impl App {
         match m.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.dragging = inside && m.column.abs_diff(border) <= 1;
+                self.text_sel = None;
                 if !self.dragging {
                     self.on_click(pos);
+                    if self.hits.text.contains(pos) {
+                        self.text_sel = Some(TextSel {
+                            anchor: pos,
+                            head: pos,
+                        });
+                        self.selecting = true;
+                    }
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) if self.dragging => {
                 let w = (m.column + 1).saturating_sub(main.x);
                 self.config.list_width = Some(clamp_list_width(w, main.width));
             }
+            MouseEventKind::Drag(MouseButton::Left) if self.selecting => {
+                let head = clamp_to(pos, self.hits.text);
+                if let Some(sel) = &mut self.text_sel {
+                    sel.head = head;
+                }
+            }
             MouseEventKind::Up(MouseButton::Left) if std::mem::take(&mut self.dragging) => {
                 self.save_config();
             }
+            MouseEventKind::Up(MouseButton::Left) if std::mem::take(&mut self.selecting) => {
+                self.copy_selection();
+            }
             MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
+                self.text_sel = None;
                 let d = if m.kind == MouseEventKind::ScrollDown {
                     1
                 } else {
@@ -592,6 +695,45 @@ impl App {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// The text of the selection, without the borders of the message boxes.
+    pub fn selection_text(&self) -> Option<String> {
+        let (a, b) = self.text_sel?.ordered();
+        let area = self.hits.text;
+        let mut lines = Vec::new();
+        for (i, cells) in self.text_cells.iter().enumerate() {
+            let y = area.y + i as u16;
+            if y < a.y || y > b.y {
+                continue;
+            }
+            let from = if y == a.y {
+                a.x.saturating_sub(area.x) as usize
+            } else {
+                0
+            };
+            let to = if y == b.y {
+                b.x.saturating_sub(area.x) as usize + 1
+            } else {
+                cells.len()
+            };
+            lines.push(row_text(cells, from, to));
+        }
+        Some(lines.join("\n"))
+    }
+
+    /// Copies the selected text to the clipboard. A selection of one cell is a
+    /// click and selects nothing.
+    fn copy_selection(&mut self) {
+        let Some(sel) = self.text_sel else { return };
+        if sel.anchor == sel.head {
+            self.text_sel = None;
+            return;
+        }
+        let text = self.selection_text().unwrap_or_default();
+        if self.clipboard_set(&text) {
+            self.info(format!("copied {} characters", text.chars().count()));
         }
     }
 
@@ -728,6 +870,7 @@ impl App {
             }
             return;
         }
+        self.text_sel = None;
         if key.code == KeyCode::Char('c')
             && key.modifiers.contains(KeyModifiers::CONTROL)
             && self.overlay.is_none()

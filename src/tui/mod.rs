@@ -380,6 +380,61 @@ mod tests {
     }
 
     #[test]
+    fn mouse_drag_selects_chat_text() {
+        use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        let (d, q) = demo();
+        let mut app = App::new(Some(q), d.path().to_path_buf(), None);
+        let s = screen(&mut app);
+        let (x, y) = find(&s, "Use OAuth");
+        let mouse = |app: &mut App, kind, column, row| {
+            app.on_mouse(MouseEvent {
+                kind,
+                column,
+                row,
+                modifiers: KeyModifiers::NONE,
+            })
+        };
+        // From the author in the top border of the box to "OAuth" in the text.
+        mouse(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            x - 2,
+            y - 1,
+        );
+        mouse(&mut app, MouseEventKind::Drag(MouseButton::Left), x + 8, y);
+        assert_eq!(app.focus, app::Focus::View);
+        let s = screen(&mut app);
+        let text = app.selection_text().unwrap();
+        let (head, body) = text.split_once('\n').unwrap();
+        assert!(head.starts_with("worker-1  question  "), "{text}\n{s}");
+        assert!(!head.contains(['─', '┐']), "{text}");
+        assert_eq!(body, "Use OAuth");
+        let mut t = Terminal::new(TestBackend::new(110, 30)).unwrap();
+        t.draw(|f| ui::draw(f, &mut app)).unwrap();
+        let buf = t.backend().buffer();
+        assert!(
+            buf[(x, y)]
+                .modifier
+                .contains(ratatui::style::Modifier::REVERSED)
+        );
+        assert!(
+            !buf[(x + 9, y)]
+                .modifier
+                .contains(ratatui::style::Modifier::REVERSED)
+        );
+        // A drag beyond the chat stops at its border.
+        mouse(&mut app, MouseEventKind::Drag(MouseButton::Left), 200, y);
+        let text = app.selection_text().unwrap();
+        assert!(text.ends_with("Use OAuth or passwords?"), "{text}");
+        // A key clears the selection.
+        key(&mut app, KeyCode::Char('j'));
+        assert_eq!(app.text_sel, None);
+        // A click without a drag selects nothing.
+        click(&mut app, x, y);
+        assert_eq!(app.text_sel, None);
+    }
+
+    #[test]
     fn mouse_selects_task_tab_and_input() {
         let (d, q) = demo();
         let mut app = App::new(Some(q), d.path().to_path_buf(), None);
@@ -789,7 +844,7 @@ mod tests {
         key(&mut app, KeyCode::Char('?'));
         let s = screen(&mut app);
         assert!(
-            s.contains("mouse drag              move the list border: change the list width"),
+            s.contains("drag the list border    change the list width"),
             "{s}"
         );
         assert!(

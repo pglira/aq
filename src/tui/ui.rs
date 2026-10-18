@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use chrono::Local;
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
@@ -43,8 +43,40 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     app.hits.right = right;
     draw_list(f, app, left);
     draw_right(f, app, right);
+    draw_selection(f, app);
     draw_footer(f, app, footer);
     draw_overlay(f, app, area);
+}
+
+/// Saves the symbols of the selectable text for a copy, and shows the
+/// selected cells in reverse video.
+fn draw_selection(f: &mut Frame, app: &mut App) {
+    let area = app.hits.text;
+    let buf = f.buffer_mut();
+    app.text_cells = (area.top()..area.bottom())
+        .map(|y| {
+            let mut hidden = 0;
+            (area.left()..area.right())
+                .map(|x| {
+                    if hidden > 0 {
+                        hidden -= 1;
+                        return String::new();
+                    }
+                    let s = buf[(x, y)].symbol();
+                    hidden = s.width().saturating_sub(1);
+                    s.to_string()
+                })
+                .collect()
+        })
+        .collect();
+    let Some(sel) = app.text_sel else { return };
+    for y in area.top()..area.bottom() {
+        for x in area.left()..area.right() {
+            if sel.contains(Position::new(x, y)) {
+                buf[(x, y)].set_style(Style::default().add_modifier(Modifier::REVERSED));
+            }
+        }
+    }
 }
 
 fn border(focused: bool) -> Block<'static> {
@@ -504,6 +536,7 @@ fn draw_chat(f: &mut Frame, app: &mut App, l: &Loaded, area: Rect) {
         _ => max_scroll,
     };
     f.render_widget(Paragraph::new(lines).scroll((scroll as u16, 0)), chat);
+    app.hits.text = chat;
 
     let focused = app.focus == Focus::Input;
     let hint = if app.reject.is_some() {
@@ -537,7 +570,7 @@ fn field_line(name: &str, value: Span<'static>) -> Line<'static> {
     ])
 }
 
-fn draw_details(f: &mut Frame, app: &App, l: &Loaded, area: Rect) {
+fn draw_details(f: &mut Frame, app: &mut App, l: &Loaded, area: Rect) {
     let m = &l.task.meta;
     let mut lines = vec![
         field_line(
@@ -605,6 +638,7 @@ fn draw_details(f: &mut Frame, app: &App, l: &Loaded, area: Rect) {
             .scroll((app.details_scroll, 0)),
         area,
     );
+    app.hits.text = area;
 }
 
 fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
@@ -988,7 +1022,8 @@ fn help_lines() -> Vec<Line<'static>> {
                     "mouse wheel",
                     "scroll the list or the view under the pointer",
                 ),
-                ("mouse drag", "move the list border: change the list width"),
+                ("mouse drag", "select text in the view and copy it"),
+                ("drag the list border", "change the list width"),
             ],
         ),
         (
