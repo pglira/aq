@@ -1,6 +1,6 @@
 # aq (agent queue)
 
-aq is a task queue for coding agents, with a TUI and a CLI. A human defines the tasks in the TUI. An orchestrator agent (for example a Claude Code session) dispatches each task to a worker subagent. The workers change the tasks only through the aq CLI. Each task has a chat, so that the human and the agents can talk about the task.
+aq is a task queue for coding agents, with a TUI and a CLI. A human defines the tasks in the TUI. An orchestrator agent (for example a Claude Code session) gives each task to a worker. A worker is a subagent of the orchestrator, or the orchestrator itself. The workers change the tasks only through the aq CLI. Each task has a chat, so that the human and the agents can talk about the task.
 
 ## Install
 
@@ -21,7 +21,7 @@ You can also use `cargo install --path .`, which installs aq to `~/.cargo/bin`.
 2. Write your rules in the `# Policy` sections of `ORCHESTRATOR.md` and `WORKER.md` (TUI keys `O` and `W`).
 3. Start the TUI with `aq` and add tasks (`c`). A new task is in `draft`. The agents do not claim it until you start it with the status menu (`s`) or with `aq start <id>`. The status menu can also delete a draft task.
 4. Optional, for Claude Code: run `aq setup-claude` to install the hooks (see "Consumers and hooks").
-5. Start the orchestrator in your agent tool with the text of `aq instructions` (TUI key `p` copies it). The orchestrator gives each worker the text of `aq instructions --worker <id>`: the start text, the path of the queue for `AQ_DIR` (for a worker in a git worktree), and the other tasks in progress.
+5. Start the orchestrator in your agent tool with the text of `aq instructions` (TUI key `p` copies it). At the start of each session, the orchestrator asks you if it uses subagents as workers, and how many workers can run at the same time. Without subagents, the orchestrator does the tasks itself, one at a time. The orchestrator decides for each task if the task needs a git worktree. The orchestrator gives each worker the text of `aq instructions --worker <id>`: the start text, the path of the queue for `AQ_DIR` (for a worker in a git worktree), and the other tasks in progress.
 6. Answer the questions of the workers in the chat of each task (`i`). An answer sets a `blocked` task back to `todo`.
 7. Review the tasks in `review` with the status menu (`s`): approve the task, or reject it. To reject, write the review comment in the chat input and press `Enter`.
 

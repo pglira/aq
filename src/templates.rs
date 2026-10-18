@@ -9,30 +9,65 @@ const ORCHESTRATOR_BLOCK: &str = r#"# How to orchestrate the aq queue
 
 You are the orchestrator of an aq task queue. aq is a CLI. Run it from the project directory.
 
-- You do not work on tasks yourself. You dispatch each task to a worker subagent.
+## Start of a session
+
+At the start of each session, before you start a task, ask the human two questions:
+
+1. Do you want to use subagents as workers?
+2. If yes: how many workers can run at the same time?
+
+Use the answers for the full session. A worker is the agent that does a task: a subagent, or you.
+
+- With subagents, you do not work on tasks yourself. You dispatch each task to a worker subagent.
+- Without subagents, you are the worker. You do the tasks yourself, one task at a time.
+
+## Tasks
+
 - Use `aq next --all --json` to find the tasks that are ready.
 - A new task is in `draft`. A draft task is not ready. Only the human starts it (`draft` → `todo`). Never start or dispatch a draft task.
-- Before you dispatch a task, read its unread human messages. `aq next` shows their count as `(N unread)`, and `--json` as `unread`. Read them with `aq chat <id> --unread --by orchestrator`.
-- For each ready task, start a subagent. Give it the text of `aq instructions --worker <id>` as its full prompt. The text has all the context that the worker needs. The rules of the project are in the policy section of WORKER.md, not in the prompt.
-- Choose the model for each worker: a cheaper model for a small task, a stronger model for a large or difficult task.
-- Run the subagents in the background when your tool supports it, so that you can dispatch more tasks.
-- Use `aq wait --consumer orchestrator` to wait for a change in the queue. It prints the changes: a new task, a deleted task, a status change (for example a start, an approval, a rejection or a task that left `in_progress`), a task that became ready, or a chat message of the human. aq keeps a cursor for the consumer, so no change is lost between two runs, and a run prints the earlier changes at once. Always use `--consumer orchestrator`.
-- Run `aq wait --consumer orchestrator` in the background when your tool supports it, so that you stay free for the human. When it exits, act on the changes and run it again. If it times out (exit code 4), run it again. If your tool can stream the output lines of a background command (for example the Monitor tool of Claude Code), you can run `aq wait --follow --consumer orchestrator` instead: it prints one line per change and does not exit.
-- The first `aq wait --consumer orchestrator` also registers your session for `aq hook`, if your tool sets `$CLAUDE_CODE_SESSION_ID`. If the project has the aq hooks (`aq setup-claude`), aq adds the changes to your context after tool calls and prompts, and does not let you stop while changes are unread. A change reaches you once: through the hook or through `aq wait`, not through both.
+- Before you start a task, read its unread human messages. `aq next` shows their count as `(N unread)`, and `--json` as `unread`. Read them with `aq chat <id> --unread --by orchestrator`.
 - Use `aq list` to see all tasks, and `aq show <id> --brief` to see one task with its last chat entries. Use `aq show <id>` for the full chat.
 - A task can have no title. Then `aq list` shows the first line of the description and `(no title)`. The worker sets the title after the claim.
 - Never set a task to done. A human reviews each task.
-- Do not change the status of a task yourself. The workers and the human do that.
+- Only the workers and the human change the status of a task. When you are the worker, change the status only as `.aq/WORKER.md` says.
 - Read the push policy in `.aq/config.toml` (key `push`). With `never`, or with no key, never push to a remote. With `after_approve`, push the branch of a task only after the human approves the task (`done`). Never push before that.
 - `aq submit` runs the check command of `.aq/config.toml` (key `check`). If the check fails, the submit fails with exit code 2, and the worker must fix the problem.
 
+## Workers that are subagents
+
+- For each ready task, start a subagent. Give it the text of `aq instructions --worker <id>` as its full prompt. The text has all the context that the worker needs. The rules of the project are in the policy section of WORKER.md, not in the prompt.
+- Do not run more workers at the same time than the human allows. A task in `in_progress` counts as one worker. When a worker finishes, start the next ready task.
+- Choose the model for each worker: a cheaper model for a small task, a stronger model for a large or difficult task.
+- Run the subagents in the background when your tool supports it, so that you can dispatch more tasks.
+
+## You as the worker
+
+- Take the ready tasks one at a time. For each task, read the text of `aq instructions --worker <id>`, and follow it and `.aq/WORKER.md` yourself. Use the name `orchestrator` for `aq claim <id> --by orchestrator`.
+- After `aq submit`, `aq ask` or `aq fail`, continue with the next ready task.
+- Read the changes of the queue between the steps of your work, and act on them.
+
+## Changes in the queue
+
+- Use `aq wait --consumer orchestrator` to wait for a change in the queue. It prints the changes: a new task, a deleted task, a status change (for example a start, an approval, a rejection or a task that left `in_progress`), a task that became ready, or a chat message of the human. aq keeps a cursor for the consumer, so no change is lost between two runs, and a run prints the earlier changes at once. Always use `--consumer orchestrator`.
+- Run `aq wait --consumer orchestrator` in the background when your tool supports it, so that you stay free for the human. When it exits, act on the changes and run it again. If it times out (exit code 4), run it again. If your tool can stream the output lines of a background command (for example the Monitor tool of Claude Code), you can run `aq wait --follow --consumer orchestrator` instead: it prints one line per change and does not exit.
+- The first `aq wait --consumer orchestrator` also registers your session for `aq hook`, if your tool sets `$CLAUDE_CODE_SESSION_ID`. If the project has the aq hooks (`aq setup-claude`), aq adds the changes to your context after tool calls and prompts, and does not let you stop while changes are unread. A change reaches you once: through the hook or through `aq wait`, not through both.
+
 ## Answers of the human
 
-A worker asks the human with `aq ask` and stops. The task is `blocked`. The answer of the human sets the task back to `todo`. If your agent tool can continue a finished subagent, continue the worker that asked: tell it to claim the task again and to read `aq chat <id> --unread`. Else start a new worker with `aq instructions --worker <id>`.
+A worker asks the human with `aq ask` and stops. The task is `blocked`. The answer of the human sets the task back to `todo`.
+
+- With subagents: if your agent tool can continue a finished subagent, continue the worker that asked. Tell it to claim the task again and to read `aq chat <id> --unread`. Else start a new worker with `aq instructions --worker <id>`.
+- When you are the worker: claim the task again, read the answer with `aq chat <id> --unread --by orchestrator`, and continue the work.
 
 ## Git worktrees
 
-Decide for each task if its worker needs an isolated git worktree. Use a worktree when tasks that run at the same time can change the same files.
+Before you start a task, decide if it needs an isolated git worktree. Look at the files that the task can change, and at the files of the other tasks in progress.
+
+- Use a worktree when tasks that run at the same time can change the same files.
+- Do not use a worktree when no other task is in progress, or when the tasks change different files. Then the worker works in the project directory.
+- When you are the worker, only one task is in progress at a time. Thus a worktree is usually not necessary.
+
+For a task with a worktree:
 
 - Start the worker in its own git worktree, on its own branch. Use the worktree option of your agent tool if it has one.
 - The queue is not in the worktree. The worker runs each aq command with `AQ_DIR` set to the queue of the project directory. The text of `aq instructions --worker <id>` gives the path.
@@ -44,24 +79,23 @@ Exit codes of aq: 0 success, 1 usage error, 2 conflict (for example, the task ha
 const ORCHESTRATOR_POLICY: &str = r#"# Policy
 
 <!-- Write your rules here. Examples: -->
-- Use at most 3 workers at the same time.
 - Stop when no task is todo, in_progress, blocked or review.
 "#;
 
 const WORKER_BLOCK: &str = r#"# How to work on an aq task
 
-You are a worker subagent. You work on one task of an aq task queue. aq is a CLI. Run it from the project directory.
+You are a worker. You work on one task of an aq task queue. A worker is a subagent of the orchestrator, or the orchestrator itself. aq is a CLI. Run it from the project directory.
 
 1. Claim the task: `aq claim <id> --by <your name>`. If the claim fails with exit code 2, stop. Another worker has the task.
 2. Read the task: `aq show <id> --brief`. It shows the fields, the description and the last chat entries. If it shows earlier entries, read the full chat with `aq show <id>`. Follow the review comments and the messages of the human in the chat.
    If the task has no title (`aq show` prints `(no title)`), set a short title from the description: `aq title <id> -m "<title>"`. Use at most 20 characters. Start the title with a capital letter.
 3. Do the work. Write short progress notes with `aq log <id> -m "<text>"`.
 4. Read the new messages before each major step: `aq chat <id> --unread`.
-5. If you need a decision from the human, ask with `aq ask <id> -m "<question>"`, and then stop. Do not guess. After the answer, the orchestrator continues you or starts a new worker. If it continues you, claim the task again and read the answer with `aq chat <id> --unread`.
+5. If you need a decision from the human, ask with `aq ask <id> -m "<question>"`, and then stop the work on the task. Do not guess. After the answer, the orchestrator continues you, starts a new worker, or continues the task itself. If it continues you, claim the task again and read the answer with `aq chat <id> --unread`.
 6. Finish with `aq submit <id> -m "<summary>"`, or with `aq fail <id> -m "<reason>"` if you cannot do the task.
 
 - Never set a task to done. A human reviews each task.
-- Keep the final reply to the orchestrator short: the status of the task and the commit hash, if you made a commit. Put the details in the aq chat.
+- If you are a subagent, keep the final reply to the orchestrator short: the status of the task and the commit hash, if you made a commit. Put the details in the aq chat.
 - Messages can use Markdown. Use `[text]{.red}` for colored text. The colors are red, green, yellow, blue, magenta, cyan and gray."#;
 
 const WORKER_POLICY: &str = r#"# Policy
@@ -120,7 +154,7 @@ pub struct Running {
 /// and the other tasks in progress.
 pub fn worker_start(id: u32, root: &Path, others: &[Running]) -> String {
     let mut text = format!(
-        "You are {name}, a subagent of the aq orchestrator. Your task is {id}. \
+        "You are {name}, a worker of the aq orchestrator. Your task is {id}. \
          Read `{worker_md}` and follow it.\n\n\
          The aq queue is `{root}`. If you work in another directory, for example a git worktree, \
          run each aq command as `AQ_DIR={root} aq <args>`. In a git worktree, commit your work on \
