@@ -257,7 +257,6 @@ mod tests {
         q.submit(1, "Login page with OAuth.").unwrap();
         let mut app = App::new(Some(q), d.path().to_path_buf(), None);
         let s = screen(&mut app);
-        println!("{s}");
         let bars = s.lines().filter(|l| l.contains("│ word")).count();
         assert!(bars >= 3, "{s}");
         assert!(s.contains("· worker-1 claimed"), "{s}");
@@ -408,7 +407,10 @@ mod tests {
         key(&mut app, KeyCode::Char('G'));
         key(&mut app, KeyCode::Char('s'));
         let s = screen(&mut app);
-        assert!(s.contains("start: give the task to the agents"), "{s}");
+        assert!(s.contains("s  start"), "{s}");
+        assert!(s.contains("d  delete"), "{s}");
+        assert!(s.contains("→ todo"), "{s}");
+        assert!(s.contains(" status of task 3 "), "{s}");
         key(&mut app, KeyCode::Enter);
         assert!(app.overlay.is_none());
         let l = q.get(3).unwrap();
@@ -430,7 +432,7 @@ mod tests {
         key(&mut app, KeyCode::Char('s'));
         key(&mut app, KeyCode::Char('j'));
         let s = screen(&mut app);
-        assert!(s.contains("delete: remove the draft task"), "{s}");
+        assert!(s.contains("d  delete"), "{s}");
         key(&mut app, KeyCode::Enter);
         let s = screen(&mut app);
         assert!(s.contains("Delete the draft task 3?"), "{s}");
@@ -445,6 +447,23 @@ mod tests {
         assert!(app.overlay.is_none());
         assert!(q.get(3).is_err());
         assert_eq!(app.selected_id(), Some(4));
+    }
+
+    #[test]
+    fn menu_key_runs_action() {
+        let (d, q) = demo();
+        q.say(1, HUMAN, Kind::Message, "ok").unwrap();
+        q.claim(1, "worker-1").unwrap();
+        q.submit(1, "done").unwrap();
+        let mut app = App::new(Some(q.clone()), d.path().to_path_buf(), None);
+        key(&mut app, KeyCode::Char('s'));
+        let s = screen(&mut app);
+        assert!(s.contains("a  approve"), "{s}");
+        assert!(s.contains("r  reject with a comment"), "{s}");
+        assert!(s.contains("→ done"), "{s}");
+        key(&mut app, KeyCode::Char('a'));
+        assert!(app.overlay.is_none());
+        assert_eq!(q.get(1).unwrap().task.status(), Status::Done);
     }
 
     #[test]
@@ -484,7 +503,6 @@ mod tests {
         let auto = app.list_drawn;
         key(&mut app, KeyCode::Char(','));
         let s = screen(&mut app);
-        println!("{s}");
         assert!(s.contains("List width"), "{s}");
         assert!(s.contains(&format!("auto ({auto} columns)")), "{s}");
         key(&mut app, KeyCode::Char('l'));
@@ -612,7 +630,6 @@ mod tests {
         let mut app = App::new(Some(q), d.path().to_path_buf(), None);
         key(&mut app, KeyCode::Char('?'));
         let s = screen(&mut app);
-        println!("{s}");
         assert!(
             s.contains("mouse drag              move the list border: change the list width"),
             "{s}"
@@ -623,7 +640,6 @@ mod tests {
             key(&mut app, KeyCode::Char('j'));
         }
         let s = screen(&mut app);
-        println!("{s}");
         assert!(
             s.contains("leave the input; keep the draft; cancel a rejection"),
             "{s}"

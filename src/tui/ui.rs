@@ -670,23 +670,46 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
             );
         }
         Overlay::Menu { id, actions, sel } => {
-            let r = centered(area, 60, actions.len() as u16 + 4);
+            let name_w = actions.iter().map(|a| a.name().width()).max().unwrap_or(0);
+            let target_w = actions
+                .iter()
+                .map(|a| a.target().width())
+                .max()
+                .unwrap_or(0);
+            // Each row: the key, the name, and the target at the right edge.
+            let row_w = name_w + target_w + 8;
+            let title = format!(" status of task {id} ");
+            let hint = " Enter  Esc ";
+            let w = row_w.max(title.width() + 4).max(hint.width() + 4) as u16 + 2;
+            let r = centered(area, w, actions.len() as u16 + 2);
             f.render_widget(Clear, r);
             let lines: Vec<Line> = actions
                 .iter()
                 .enumerate()
                 .map(|(i, a)| {
-                    let style = if i == *sel {
-                        Style::default().fg(ACCENT).add_modifier(Modifier::REVERSED)
-                    } else {
-                        Style::default()
-                    };
-                    Line::styled(format!(" {} ", a.label()), style)
+                    let pad = (w as usize - 2).saturating_sub(a.name().width() + 5);
+                    let key = format!(" {}  ", a.key());
+                    let target = format!("{:>pad$} ", a.target());
+                    if i == *sel {
+                        let style = Style::default().fg(ACCENT).add_modifier(Modifier::REVERSED);
+                        return Line::styled(format!("{key}{}{target}", a.name()), style);
+                    }
+                    Line::from(vec![
+                        Span::styled(
+                            key,
+                            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(a.name()),
+                        Span::styled(target, Style::default().fg(DIM)),
+                    ])
                 })
                 .collect();
             f.render_widget(
-                Paragraph::new(lines)
-                    .block(border(true).title(format!(" status of task {id} (Enter, Esc) "))),
+                Paragraph::new(lines).block(
+                    border(true)
+                        .title(title)
+                        .title_bottom(Line::styled(hint, Style::default().fg(DIM))),
+                ),
                 r,
             );
         }
@@ -922,7 +945,7 @@ fn help_lines() -> Vec<Line<'static>> {
                 ("e / E", "edit the task in a form / in $EDITOR"),
                 (
                     "s",
-                    "change the status: start, delete, approve, reject, retry, answer",
+                    "change the status (menu: the action key, or j/k and Enter)",
                 ),
                 ("x", "archive the done tasks"),
                 ("p", "copy the start text for the orchestrator"),

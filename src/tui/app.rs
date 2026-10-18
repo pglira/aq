@@ -134,14 +134,35 @@ pub enum MenuAction {
 }
 
 impl MenuAction {
-    pub fn label(self) -> &'static str {
+    /// The key that runs the action while the menu is open.
+    pub fn key(self) -> char {
         match self {
-            MenuAction::Start => "start: give the task to the agents: draft → todo",
-            MenuAction::Delete => "delete: remove the draft task",
-            MenuAction::Approve => "approve: review → done",
-            MenuAction::Reject => "reject with a comment: review → todo",
-            MenuAction::Retry => "retry: release the claim → todo",
-            MenuAction::Answer => "answer the question in the chat: blocked → todo",
+            MenuAction::Start => 's',
+            MenuAction::Delete => 'd',
+            MenuAction::Approve => 'a',
+            MenuAction::Reject => 'r',
+            MenuAction::Retry => 'r',
+            MenuAction::Answer => 'a',
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            MenuAction::Start => "start",
+            MenuAction::Delete => "delete",
+            MenuAction::Approve => "approve",
+            MenuAction::Reject => "reject with a comment",
+            MenuAction::Retry => "retry",
+            MenuAction::Answer => "answer in the chat",
+        }
+    }
+
+    /// The result of the action: the new status, or the removal of the task.
+    pub fn target(self) -> &'static str {
+        match self {
+            MenuAction::Delete => "remove",
+            MenuAction::Approve => "→ done",
+            _ => "→ todo",
         }
     }
 }
@@ -941,6 +962,11 @@ impl App {
                 }),
                 KeyCode::Enter => {
                     self.run_menu(id, actions[sel]);
+                    self.overlay.take()
+                }
+                KeyCode::Char(c) if actions.iter().any(|a| a.key() == c) => {
+                    let a = actions.into_iter().find(|a| a.key() == c).unwrap();
+                    self.run_menu(id, a);
                     self.overlay.take()
                 }
                 _ => Some(Overlay::Menu { id, actions, sel }),
