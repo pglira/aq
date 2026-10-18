@@ -4,6 +4,7 @@ mod editor;
 mod error;
 mod markdown;
 mod queue;
+mod queue_config;
 mod task;
 mod templates;
 mod tui;
@@ -51,6 +52,9 @@ enum Cmd {
         /// Write the fixed blocks of ORCHESTRATOR.md and WORKER.md again. The policy sections stay.
         #[arg(long)]
         update_agent: bool,
+        /// Make a first commit if the project is a git repository without commits.
+        #[arg(long)]
+        commit: bool,
     },
     /// Make a task in draft. It needs a title or a description. `aq start` gives it to the agents.
     Add {
@@ -157,6 +161,9 @@ enum Cmd {
         id: u32,
         #[arg(short, long)]
         message: String,
+        /// Do not run the check command of `.aq/config.toml`.
+        #[arg(long)]
+        no_check: bool,
     },
     /// Give up the task. The task goes to failed.
     Fail {
@@ -235,16 +242,24 @@ fn run(cli: Cli) -> Result<()> {
         return tui::run(q, project);
     };
     match cmd {
-        Cmd::Init { update_agent: true } => {
+        Cmd::Init {
+            update_agent: true, ..
+        } => {
             let q = find()?;
             q.update_instructions()?;
             out!("updated the aq blocks in {}", q.root.display());
         }
         Cmd::Init {
             update_agent: false,
+            commit,
         } => {
             let q = Queue::init(&project)?;
+            let config = q.root.join(queue_config::FILE);
+            if !config.exists() {
+                queue::write_atomic(&config, queue_config::TEMPLATE)?;
+            }
             out!("initialized {}", q.root.display());
+            git_first_commit(&project, commit)?;
         }
         Cmd::Add {
             title,
@@ -399,8 +414,21 @@ fn run(cli: Cli) -> Result<()> {
             find()?.ask(id, &message)?;
             out!("task {id} is blocked until the human answers; stop now");
         }
-        Cmd::Submit { id, message } => {
-            find()?.submit(id, &message)?;
+        Cmd::Submit {
+            id,
+            message,
+            no_check,
+        } => {
+            let q = find()?;
+            let config = queue_config::load(&q.root.join(queue_config::FILE))?;
+            match config.check {
+                Some(cmd) if no_check => {
+                    q.log(id, &format!("check skipped (--no-check): {cmd}"))?;
+                }
+                Some(cmd) => queue_config::run_check(&cmd, &project_of(&q))?,
+                None => {}
+            }
+            q.submit(id, &message)?;
             out!("task {id} is in review");
         }
         Cmd::Fail { id, message } => {
@@ -443,6 +471,46 @@ fn run(cli: Cli) -> Result<()> {
             None => out!("{}", templates::orchestrator_start()),
         },
     }
+    Ok(())
+}
+
+/// The project directory of a queue: the parent of its `.aq` directory.
+fn project_of(q: &Queue) -> PathBuf {
+    q.root.parent().unwrap_or(&q.root).to_path_buf()
+}
+
+/// Runs a git command in `dir`. Returns true if it exits with code 0.
+fn git_ok(dir: &Path, args: &[&str]) -> bool {
+    std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// If `dir` is a git repository without commits, warns about it. With `commit`,
+/// the function stages all files and makes a first commit.
+fn git_first_commit(dir: &Path, commit: bool) -> Result<()> {
+    if !git_ok(dir, &["rev-parse", "--git-dir"]) || git_ok(dir, &["rev-parse", "--verify", "HEAD"])
+    {
+        return Ok(());
+    }
+    if !commit {
+        eprintln!(
+            "aq: warning: this git repository has no commits, so workers cannot branch from it. \
+             Run `aq init --commit` to make a first commit."
+        );
+        return Ok(());
+    }
+    if !git_ok(dir, &["add", "-A"])
+        || !git_ok(dir, &["commit", "--allow-empty", "-m", "Initial commit"])
+    {
+        return Err(anyhow::anyhow!("the first commit failed"));
+    }
+    out!("made the first commit");
     Ok(())
 }
 

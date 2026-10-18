@@ -17,6 +17,8 @@ You are the orchestrator of an aq task queue. aq is a CLI. Run it from the proje
 - A task can have no title. Then `aq list` shows the first line of the description and `(no title)`. The worker sets the title after the claim.
 - Never set a task to done. A human reviews each task.
 - Do not change the status of a task yourself. The workers and the human do that.
+- Read the push policy in `.aq/config.toml` (key `push`). With `never`, or with no key, never push to a remote. With `after_approve`, push the branch of a task only after the human approves the task (`done`). Never push before that.
+- `aq submit` runs the check command of `.aq/config.toml` (key `check`). If the check fails, the submit fails with exit code 2, and the worker must fix the problem.
 
 Exit codes of aq: 0 success, 1 usage error, 2 conflict (for example, the task has another status), 3 no queue found, 4 timeout of `aq wait`."#;
 
