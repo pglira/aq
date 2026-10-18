@@ -11,7 +11,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use tui_textarea::TextArea;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use super::app::{App, Filter, Focus, Overlay, Setting, View, clamp_list_width};
+use super::app::{App, Filter, Focus, Hits, Overlay, Setting, View, clamp_list_width};
 use super::form::{Field, Form};
 use crate::chat::{AQ, Entry, HUMAN, Kind};
 use crate::markdown;
@@ -25,6 +25,7 @@ const AGENT_COLOR: Color = Color::Cyan;
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
+    app.hits = Hits::default();
     if app.q.is_none() {
         draw_no_queue(f, app, area);
         return;
@@ -39,6 +40,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let [left, right] =
         Layout::horizontal([Constraint::Length(list_w), Constraint::Min(10)]).areas(main);
     app.page = right.height.saturating_sub(4);
+    app.hits.right = right;
     draw_list(f, app, left);
     draw_right(f, app, right);
     draw_footer(f, app, footer);
@@ -106,7 +108,7 @@ fn status_color(s: Status) -> Color {
     }
 }
 
-fn draw_list(f: &mut Frame, app: &App, area: Rect) {
+fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
     let title = format!(" Tasks [{}] {} ", app.filter.name(), app.visible.len());
     let block = border(app.focus == Focus::List).title(title);
     let inner = block.inner(area);
@@ -114,6 +116,8 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
     let w = inner.width as usize;
     let height = inner.height as usize;
     let top = app.sel.saturating_sub(height.saturating_sub(1));
+    app.hits.list = inner;
+    app.hits.list_top = top;
     let mut lines = Vec::new();
     for (row, idx) in app.visible.iter().enumerate().skip(top).take(height) {
         let l = &app.tasks[*idx];
@@ -209,8 +213,22 @@ fn view_tabs(active: View, focused: bool) -> Line<'static> {
     Line::from(spans)
 }
 
+/// The areas of the tabs that `view_tabs` draws in the top border of `area`.
+fn tab_areas(area: Rect) -> Vec<(Rect, View)> {
+    let mut x = area.x + 2;
+    let mut out = Vec::new();
+    for (i, v) in View::ALL.iter().enumerate() {
+        let w = format!("{} {}", i + 1, v.title()).width() as u16;
+        let r = Rect::new(x, area.y, w, 1).intersection(area);
+        out.push((r, *v));
+        x += w + 3;
+    }
+    out
+}
+
 fn draw_right(f: &mut Frame, app: &mut App, area: Rect) {
     let focused = app.focus == Focus::View;
+    app.hits.tabs = tab_areas(area);
     let block = border(focused).title(view_tabs(app.view, focused));
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -463,14 +481,15 @@ fn draw_chat(f: &mut Frame, app: &mut App, l: &Loaded, area: Rect) {
     let mut sel_range = None;
     let n = l.chat.len();
     for (i, e) in l.chat.iter().enumerate() {
-        let selected = app.focus == Focus::View && app.chat_sel.unwrap_or(n.saturating_sub(1)) == i;
+        let current = app.chat_sel.unwrap_or(n.saturating_sub(1)) == i;
+        let selected = app.focus == Focus::View && current;
         // A blank line separates entries, except two compact events in a row.
         if i > 0 && !(is_compact(e) && is_compact(&l.chat[i - 1])) {
             lines.push(Line::default());
         }
         let start = lines.len();
         lines.extend(entry_lines(e, selected, width));
-        if selected {
+        if current {
             sel_range = Some((start, lines.len()));
         }
     }
@@ -495,6 +514,7 @@ fn draw_chat(f: &mut Frame, app: &mut App, l: &Loaded, area: Rect) {
         " message (Enter sends, Alt+Enter new line) "
     };
     let block = border(focused).title(if focused { hint } else { " i: write " });
+    app.hits.input = input;
     let inner = block.inner(input);
     f.render_widget(block, input);
     style_area(&mut app.input, focused);
@@ -641,6 +661,7 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
                 + 2;
             let h = lines.len() as u16 + 2;
             let r = centered(area, w, h);
+            app.hits.overlay = r;
             // Keep the last line at the bottom edge of the box when scrolled.
             *scroll = (*scroll).min(h.saturating_sub(r.height));
             f.render_widget(Clear, r);
@@ -653,6 +674,7 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
         }
         Overlay::ConfirmArchive => {
             let r = centered(area, 50, 5);
+            app.hits.overlay = r;
             f.render_widget(Clear, r);
             f.render_widget(
                 Paragraph::new("Move all done tasks to .aq/archive/?\n\ny: yes   n: no")
@@ -662,6 +684,7 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
         }
         Overlay::ConfirmDelete { id } => {
             let r = centered(area, 50, 5);
+            app.hits.overlay = r;
             f.render_widget(Clear, r);
             f.render_widget(
                 Paragraph::new(format!("Delete the draft task {id}?\n\ny: yes   n: no"))
@@ -682,6 +705,8 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
             let hint = " Enter  Esc ";
             let w = row_w.max(title.width() + 4).max(hint.width() + 4) as u16 + 2;
             let r = centered(area, w, actions.len() as u16 + 2);
+            app.hits.overlay = r;
+            app.hits.rows = border(true).inner(r);
             f.render_widget(Clear, r);
             let lines: Vec<Line> = actions
                 .iter()
@@ -715,6 +740,7 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
         }
         Overlay::Search { input } => {
             let r = centered(area, 50, 3);
+            app.hits.overlay = r;
             f.render_widget(Clear, r);
             let block = border(true).title(" search (Enter, Esc) ");
             let inner = block.inner(r);
@@ -743,7 +769,9 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
         }
         Overlay::Settings { .. } => {
             if let Some(Overlay::Settings { sel, mut edit }) = app.overlay.take() {
-                draw_settings(f, app, sel, edit.as_deref_mut(), area);
+                let (r, rows) = draw_settings(f, app, sel, edit.as_deref_mut(), area);
+                app.hits.overlay = r;
+                app.hits.rows = rows;
                 app.overlay = Some(Overlay::Settings { sel, edit });
             }
         }
@@ -777,13 +805,14 @@ fn setting_value(app: &App, s: Setting) -> Span<'static> {
     }
 }
 
+/// Draws the settings and gives the box and the area of the setting rows.
 fn draw_settings(
     f: &mut Frame,
     app: &App,
     sel: Setting,
     edit: Option<&mut TextArea<'static>>,
     area: Rect,
-) {
+) -> (Rect, Rect) {
     let r = centered(area, 70, Setting::ALL.len() as u16 + 8);
     f.render_widget(Clear, r);
     let block = border(true).title(" settings ");
@@ -838,6 +867,13 @@ fn draw_settings(
         style_area(ta, true);
         f.render_widget(&*ta, row);
     }
+    let rows = Rect {
+        y: inner.y + first_row,
+        height: Setting::ALL.len() as u16,
+        ..inner
+    }
+    .intersection(inner);
+    (r, rows)
 }
 
 fn draw_form(f: &mut Frame, form: &mut Form, area: Rect) {
@@ -934,6 +970,14 @@ fn help_lines() -> Vec<Line<'static>> {
                 ("Enter", "open the link of a message"),
                 ("f", "filter: open, review, blocked, all, done"),
                 ("R, F5", "reload"),
+                (
+                    "mouse click",
+                    "select a task, a tab, a pane, the input, a row",
+                ),
+                (
+                    "mouse wheel",
+                    "scroll the list or the view under the pointer",
+                ),
                 ("mouse drag", "move the list border: change the list width"),
             ],
         ),

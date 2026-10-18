@@ -339,6 +339,164 @@ mod tests {
         assert_eq!(app.list_drawn, 110 - 20);
     }
 
+    fn click(app: &mut App, column: u16, row: u16) {
+        use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            app.on_mouse(MouseEvent {
+                kind,
+                column,
+                row,
+                modifiers: KeyModifiers::NONE,
+            });
+        }
+    }
+
+    fn wheel(app: &mut App, down: bool, column: u16, row: u16) {
+        use ratatui::crossterm::event::{MouseEvent, MouseEventKind};
+        let kind = if down {
+            MouseEventKind::ScrollDown
+        } else {
+            MouseEventKind::ScrollUp
+        };
+        app.on_mouse(MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+
+    /// The column and the row of the first cell of `text` on the screen.
+    fn find(s: &str, text: &str) -> (u16, u16) {
+        for (y, line) in s.lines().enumerate() {
+            if let Some(i) = line.find(text) {
+                return (line[..i].chars().count() as u16, y as u16);
+            }
+        }
+        panic!("`{text}` is not on the screen:\n{s}");
+    }
+
+    #[test]
+    fn mouse_selects_task_tab_and_input() {
+        let (d, q) = demo();
+        let mut app = App::new(Some(q), d.path().to_path_buf(), None);
+        let s = screen(&mut app);
+        let (x, y) = find(&s, "Fix cache");
+        click(&mut app, x, y);
+        assert_eq!(app.selected_id(), Some(2));
+        assert_eq!(app.focus, app::Focus::List);
+
+        let s = screen(&mut app);
+        let (x, y) = find(&s, "2 Details");
+        click(&mut app, x + 3, y);
+        assert_eq!(app.view, app::View::Details);
+        assert_eq!(app.focus, app::Focus::View);
+        let s = screen(&mut app);
+        assert!(s.contains("Description"), "{s}");
+
+        let (x, y) = find(&s, "1 Chat");
+        click(&mut app, x, y);
+        assert_eq!(app.view, app::View::Chat);
+
+        key(&mut app, KeyCode::Char('h'));
+        let s = screen(&mut app);
+        let (x, y) = find(&s, " i: write ");
+        click(&mut app, x + 2, y + 1);
+        assert_eq!(app.focus, app::Focus::Input);
+        typ(&mut app, "hi");
+        assert_eq!(app.input.lines()[0], "hi");
+
+        // A click in the chat above the input focuses the view.
+        click(&mut app, x + 2, y - 3);
+        assert_eq!(app.focus, app::Focus::View);
+        // A click below the last task focuses the list and keeps the selection.
+        click(&mut app, 3, 20);
+        assert_eq!(app.focus, app::Focus::List);
+        assert_eq!(app.selected_id(), Some(2));
+    }
+
+    #[test]
+    fn mouse_wheel_scrolls_pane_under_pointer() {
+        let (d, q) = demo();
+        let mut app = App::new(Some(q), d.path().to_path_buf(), None);
+        screen(&mut app);
+        assert_eq!(app.selected_id(), Some(1));
+        wheel(&mut app, true, 3, 5);
+        assert_eq!(app.selected_id(), Some(2));
+        wheel(&mut app, false, 3, 5);
+        assert_eq!(app.selected_id(), Some(1));
+
+        let right = app.list_drawn + 10;
+        assert_eq!(app.chat_sel, None);
+        wheel(&mut app, false, right, 5);
+        assert_eq!(app.selected_id(), Some(1));
+        assert!(app.chat_sel.is_some());
+        wheel(&mut app, true, right, 5);
+        assert_eq!(app.chat_sel, None);
+
+        key(&mut app, KeyCode::Char('2'));
+        screen(&mut app);
+        wheel(&mut app, true, right, 5);
+        assert_eq!(app.details_scroll, 3);
+        wheel(&mut app, false, right, 5);
+        assert_eq!(app.details_scroll, 0);
+        assert_eq!(app.focus, app::Focus::List);
+    }
+
+    #[test]
+    fn mouse_in_menu_and_settings() {
+        let (d, q) = demo();
+        q.create("Draft task", |_| {}).unwrap();
+        let mut app = App::new(Some(q.clone()), d.path().to_path_buf(), None);
+        key(&mut app, KeyCode::Char('G'));
+        key(&mut app, KeyCode::Char('s'));
+        let s = screen(&mut app);
+        let (x, y) = find(&s, "d  delete");
+        click(&mut app, x, y);
+        assert!(matches!(
+            app.overlay,
+            Some(app::Overlay::Menu { sel: 1, .. })
+        ));
+        click(&mut app, x, y);
+        assert!(matches!(
+            app.overlay,
+            Some(app::Overlay::ConfirmDelete { id: 3 })
+        ));
+        screen(&mut app);
+        click(&mut app, 0, 0);
+        assert!(app.overlay.is_none());
+        assert!(q.get(3).is_ok());
+
+        key(&mut app, KeyCode::Char('s'));
+        let s = screen(&mut app);
+        let (x, y) = find(&s, "s  start");
+        click(&mut app, x, y);
+        assert!(app.overlay.is_none());
+        assert_eq!(q.get(3).unwrap().task.status(), Status::Todo);
+
+        key(&mut app, KeyCode::Char(','));
+        let s = screen(&mut app);
+        let (x, y) = find(&s, "Notifications");
+        assert!(!app.config.notifications);
+        click(&mut app, x, y);
+        assert!(matches!(
+            app.overlay,
+            Some(app::Overlay::Settings {
+                sel: app::Setting::Notifications,
+                ..
+            })
+        ));
+        assert!(!app.config.notifications);
+        click(&mut app, x, y);
+        assert!(app.config.notifications);
+        screen(&mut app);
+        click(&mut app, 0, 0);
+        assert!(app.overlay.is_none());
+    }
+
     thread_local! {
         static SENT: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
     }
@@ -632,6 +790,10 @@ mod tests {
         let s = screen(&mut app);
         assert!(
             s.contains("mouse drag              move the list border: change the list width"),
+            "{s}"
+        );
+        assert!(
+            s.contains("mouse wheel             scroll the list or the view under the pointer"),
             "{s}"
         );
         assert!(s.contains("Navigation"), "{s}");

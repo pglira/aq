@@ -8,7 +8,7 @@ use anyhow::Result;
 use ratatui::crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use tui_textarea::TextArea;
 
 use super::desktop;
@@ -230,6 +230,26 @@ impl Setting {
     }
 }
 
+/// The screen areas of the last frame that take mouse clicks. An empty
+/// `Rect` is an area that the frame does not show.
+#[derive(Debug, Clone, Default)]
+pub struct Hits {
+    /// The rows of the task list, inside its border.
+    pub list: Rect,
+    /// The index into `visible` of the task in the first row of the list.
+    pub list_top: usize,
+    /// The tabs in the top border of the right pane.
+    pub tabs: Vec<(Rect, View)>,
+    /// The right pane, with its border.
+    pub right: Rect,
+    /// The chat input, with its border.
+    pub input: Rect,
+    /// The box of the overlay.
+    pub overlay: Rect,
+    /// The rows of the status menu or of the settings, one row for each item.
+    pub rows: Rect,
+}
+
 /// Work that needs the terminal, and runs between two frames.
 pub enum Job {
     EditTask { id: u32, start: Option<String> },
@@ -277,6 +297,8 @@ pub struct App {
     pub main_area: Rect,
     /// The drawn width of the task list.
     pub list_drawn: u16,
+    /// The areas of the last frame that take mouse clicks.
+    pub hits: Hits,
     /// True while the user drags the border of the task list.
     dragging: bool,
     /// The status of each task at the last reload. `None` before the first load.
@@ -321,6 +343,7 @@ impl App {
             config_ok: true,
             main_area: Rect::default(),
             list_drawn: 0,
+            hits: Hits::default(),
             dragging: false,
             statuses: None,
             own_changes: HashSet::new(),
@@ -520,18 +543,28 @@ impl App {
         self.mark_read();
     }
 
-    /// Drag the right border of the task list with the left mouse button to
-    /// change the width of the list.
+    /// Handles the mouse. A drag of the right border of the task list with the
+    /// left button changes the width of the list. A left click selects a task,
+    /// a tab, a pane, the chat input or a row of an overlay. The wheel scrolls
+    /// the pane under the pointer.
     pub fn on_mouse(&mut self, m: MouseEvent) {
+        if self.q.is_none() {
+            return;
+        }
+        if let Some(ov) = self.overlay.take() {
+            self.overlay = self.on_overlay_mouse(ov, m);
+            return;
+        }
         let main = self.main_area;
         let border = main.x + self.list_drawn.saturating_sub(1);
         let inside = m.row >= main.y && m.row < main.y + main.height;
+        let pos = Position::new(m.column, m.row);
         match m.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                self.dragging = self.q.is_some()
-                    && self.overlay.is_none()
-                    && inside
-                    && m.column.abs_diff(border) <= 1;
+                self.dragging = inside && m.column.abs_diff(border) <= 1;
+                if !self.dragging {
+                    self.on_click(pos);
+                }
             }
             MouseEventKind::Drag(MouseButton::Left) if self.dragging => {
                 let w = (m.column + 1).saturating_sub(main.x);
@@ -540,7 +573,113 @@ impl App {
             MouseEventKind::Up(MouseButton::Left) if std::mem::take(&mut self.dragging) => {
                 self.save_config();
             }
+            MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
+                let d = if m.kind == MouseEventKind::ScrollDown {
+                    1
+                } else {
+                    -1
+                };
+                if self.hits.list.contains(pos) {
+                    self.move_in(Focus::List, d);
+                } else if self.hits.right.contains(pos) {
+                    let d = if self.view == View::Details { d * 3 } else { d };
+                    self.move_in(Focus::View, d);
+                }
+            }
             _ => {}
+        }
+    }
+
+    /// A left click at `pos` without an overlay.
+    fn on_click(&mut self, pos: Position) {
+        let hits = &self.hits;
+        if hits.list.contains(pos) {
+            let i = hits.list_top + (pos.y - hits.list.y) as usize;
+            self.leave_input();
+            self.focus = Focus::List;
+            if i < self.visible.len() {
+                self.select(i);
+            }
+        } else if let Some((_, v)) = hits.tabs.iter().find(|(r, _)| r.contains(pos)) {
+            let v = *v;
+            self.leave_input();
+            self.set_view(v);
+            self.focus = Focus::View;
+        } else if hits.input.contains(pos) {
+            self.focus = Focus::Input;
+        } else if hits.right.contains(pos) {
+            self.leave_input();
+            self.focus = Focus::View;
+        }
+    }
+
+    /// Moves the focus from the chat input to the view and cancels a rejection.
+    fn leave_input(&mut self) {
+        if self.focus != Focus::Input {
+            return;
+        }
+        if self.reject.take().is_some() {
+            self.info("cancelled the rejection");
+        }
+        self.focus = Focus::View;
+    }
+
+    /// Handles the mouse while the overlay `ov` is open, and gives the overlay
+    /// that stays open. A left click outside the box closes the help, the
+    /// confirmations, the search, the status menu and the settings.
+    fn on_overlay_mouse(&mut self, ov: Overlay, m: MouseEvent) -> Option<Overlay> {
+        let pos = Position::new(m.column, m.row);
+        let row = self
+            .hits
+            .rows
+            .contains(pos)
+            .then(|| (pos.y - self.hits.rows.y) as usize);
+        let outside = !self.hits.overlay.contains(pos);
+        let click = m.kind == MouseEventKind::Down(MouseButton::Left);
+        match ov {
+            Overlay::Help { scroll } => match m.kind {
+                MouseEventKind::ScrollDown => Some(Overlay::Help {
+                    scroll: scroll.saturating_add(3),
+                }),
+                MouseEventKind::ScrollUp => Some(Overlay::Help {
+                    scroll: scroll.saturating_sub(3),
+                }),
+                _ if click && outside => None,
+                _ => Some(Overlay::Help { scroll }),
+            },
+            Overlay::ConfirmArchive | Overlay::ConfirmDelete { .. } | Overlay::Search { .. }
+                if click && outside =>
+            {
+                None
+            }
+            Overlay::Menu { id, actions, sel } if click => match row {
+                Some(i) if i == sel => {
+                    self.run_menu(id, actions[i]);
+                    self.overlay.take()
+                }
+                Some(i) if i < actions.len() => Some(Overlay::Menu {
+                    id,
+                    actions,
+                    sel: i,
+                }),
+                _ if outside => None,
+                _ => Some(Overlay::Menu { id, actions, sel }),
+            },
+            Overlay::Settings { sel, edit } if click => {
+                match (row.and_then(|i| Setting::ALL.get(i)), edit) {
+                    (Some(s), None) if *s == sel => {
+                        let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+                        self.on_settings_key(sel, None, enter)
+                    }
+                    (Some(s), None) => Some(Overlay::Settings {
+                        sel: *s,
+                        edit: None,
+                    }),
+                    _ if outside => None,
+                    (_, edit) => Some(Overlay::Settings { sel, edit }),
+                }
+            }
+            ov => Some(ov),
         }
     }
 
@@ -602,12 +741,7 @@ impl App {
     fn on_input_key(&mut self, key: KeyEvent) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
-            KeyCode::Esc => {
-                if self.reject.take().is_some() {
-                    self.info("cancelled the rejection");
-                }
-                self.focus = Focus::View;
-            }
+            KeyCode::Esc => self.leave_input(),
             KeyCode::Enter if key.modifiers.is_empty() => match self.reject {
                 Some(id) => self.send_reject(id),
                 None => self.send(),
@@ -766,6 +900,11 @@ impl App {
     }
 
     fn move_by(&mut self, d: isize) {
+        self.move_in(self.focus, d);
+    }
+
+    /// Moves the selection of the list (`Focus::List`) or of the view by `d`.
+    fn move_in(&mut self, target: Focus, d: isize) {
         let clamp = |cur: usize, n: usize| -> usize {
             if n == 0 {
                 0
@@ -773,7 +912,7 @@ impl App {
                 (cur as isize + d).clamp(0, n as isize - 1) as usize
             }
         };
-        if self.focus == Focus::List {
+        if target == Focus::List {
             let i = clamp(self.sel, self.visible.len());
             self.select(i);
             return;
