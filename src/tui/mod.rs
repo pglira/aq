@@ -814,4 +814,40 @@ mod tests {
         key(&mut app, KeyCode::Char('k'));
         assert!(matches!(app.overlay, Some(app::Overlay::Help { scroll }) if scroll > 0));
     }
+
+    #[test]
+    fn deps_key_sets_dependencies() {
+        let (d, q) = demo();
+        let mut app = App::new(Some(q.clone()), d.path().to_path_buf(), None);
+        key(&mut app, KeyCode::Char('j'));
+        key(&mut app, KeyCode::Char('D'));
+        assert!(matches!(
+            app.overlay,
+            Some(app::Overlay::Deps { id: 2, .. })
+        ));
+        let s = screen(&mut app);
+        assert!(s.contains("task 2 depends on"), "{s}");
+        key(&mut app, KeyCode::Backspace);
+        typ(&mut app, "x");
+        key(&mut app, KeyCode::Enter);
+        assert!(app.overlay.is_some());
+        key(&mut app, KeyCode::Backspace);
+        key(&mut app, KeyCode::Enter);
+        assert!(app.overlay.is_none());
+        assert!(q.get(2).unwrap().task.meta.depends_on.is_empty());
+    }
+
+    #[test]
+    fn unread_mail_shows_for_todo_tasks() {
+        let (d, q) = demo();
+        q.say(2, "orchestrator", crate::chat::Kind::Message, "Question?")
+            .unwrap();
+        let mut app = App::new(Some(q), d.path().to_path_buf(), None);
+        let s = screen(&mut app);
+        assert!(
+            s.lines()
+                .any(|l| l.contains("Fix cache") && l.contains('✉')),
+            "{s}"
+        );
+    }
 }

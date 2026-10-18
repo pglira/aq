@@ -748,6 +748,16 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
             style_area(input, true);
             f.render_widget(&**input, inner);
         }
+        Overlay::Deps { id, input } => {
+            let r = centered(area, 50, 3);
+            app.hits.overlay = r;
+            f.render_widget(Clear, r);
+            let block = border(true).title(format!(" task {id} depends on (ids; Enter, Esc) "));
+            let inner = block.inner(r);
+            f.render_widget(block, r);
+            style_area(input, true);
+            f.render_widget(&**input, inner);
+        }
         Overlay::InvalidEdit { id, error, .. } => {
             let r = centered(area, 70, 9);
             f.render_widget(Clear, r);
@@ -986,6 +996,7 @@ fn help_lines() -> Vec<Line<'static>> {
             &[
                 ("i", "write in the chat of the task"),
                 ("c", "new task"),
+                ("D", "set the dependencies of the task (ids)"),
                 ("e / E", "edit the task in a form / in $EDITOR"),
                 (
                     "s",

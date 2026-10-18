@@ -16,8 +16,8 @@ use super::form::{Field, Form, FormResult};
 use super::textedit::{edit_key, new_area, paste, text_of};
 use crate::chat::{self, HUMAN, Kind};
 use crate::config::{self, Config};
-use crate::queue::{Loaded, Queue, waits_for_deps};
-use crate::task::{Status, Task};
+use crate::queue::{Loaded, Queue, join_ids, waits_for_deps};
+use crate::task::{Status, Task, parse_ids};
 use crate::templates;
 
 /// The smallest width of the task list.
@@ -179,6 +179,11 @@ pub enum Overlay {
         sel: usize,
     },
     Search {
+        input: Box<TextArea<'static>>,
+    },
+    /// The one-line edit of the dependencies of task `id`.
+    Deps {
+        id: u32,
         input: Box<TextArea<'static>>,
     },
     InvalidEdit {
@@ -647,7 +652,10 @@ impl App {
                 _ if click && outside => None,
                 _ => Some(Overlay::Help { scroll }),
             },
-            Overlay::ConfirmArchive | Overlay::ConfirmDelete { .. } | Overlay::Search { .. }
+            Overlay::ConfirmArchive
+            | Overlay::ConfirmDelete { .. }
+            | Overlay::Search { .. }
+            | Overlay::Deps { .. }
                 if click && outside =>
             {
                 None
@@ -687,6 +695,7 @@ impl App {
         match &mut self.overlay {
             Some(Overlay::Form(f)) => f.on_paste(text),
             Some(Overlay::Search { input })
+            | Some(Overlay::Deps { input, .. })
             | Some(Overlay::Settings {
                 edit: Some(input), ..
             }) => paste(input, text, false),
@@ -848,6 +857,15 @@ impl App {
             KeyCode::Char('E') => {
                 if let Some(id) = self.selected_id() {
                     self.job = Some(Job::EditTask { id, start: None });
+                }
+            }
+            KeyCode::Char('D') => {
+                if let Some(l) = self.selected() {
+                    let input = Box::new(new_area(&join_ids(&l.task.meta.depends_on)));
+                    self.overlay = Some(Overlay::Deps {
+                        id: l.task.id(),
+                        input,
+                    });
                 }
             }
             KeyCode::Char('s') => self.open_menu(),
@@ -1122,6 +1140,20 @@ impl App {
                     Some(Overlay::Search { input })
                 }
             },
+            Overlay::Deps { id, mut input } => match key.code {
+                KeyCode::Esc => None,
+                KeyCode::Enter => match self.save_deps(id, &text_of(&input)) {
+                    Ok(()) => None,
+                    Err(e) => {
+                        self.error(e);
+                        Some(Overlay::Deps { id, input })
+                    }
+                },
+                _ => {
+                    edit_key(&mut input, key, false);
+                    Some(Overlay::Deps { id, input })
+                }
+            },
             Overlay::InvalidEdit { id, text, error } => match key.code {
                 KeyCode::Char('e') | KeyCode::Enter => {
                     self.job = Some(Job::EditTask {
@@ -1313,6 +1345,21 @@ impl App {
                 self.reload();
             }
         }
+        Ok(())
+    }
+
+    /// Sets the dependencies of task `id` from a list of ids and reloads the queue.
+    fn save_deps(&mut self, id: u32, text: &str) -> Result<(), String> {
+        let deps = parse_ids(text).map_err(|e| e.to_string())?;
+        let Some(q) = self.q.clone() else {
+            return Err("no queue".into());
+        };
+        let mut task = q.get(id).map_err(|e| format!("{e:#}"))?.task;
+        task.meta.depends_on = deps;
+        self.own_changes.insert(id);
+        q.update_content(&task).map_err(|e| format!("{e:#}"))?;
+        self.info(format!("saved the dependencies of task {id}"));
+        self.reload();
         Ok(())
     }
 
