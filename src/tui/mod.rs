@@ -417,6 +417,37 @@ mod tests {
     }
 
     #[test]
+    fn menu_deletes_draft_after_confirmation() {
+        let (d, q) = demo();
+        q.create("Draft one", |_| {}).unwrap();
+        q.create("Draft two", |_| {}).unwrap();
+        let mut app = App::new(Some(q.clone()), d.path().to_path_buf(), None);
+        app.filter = Filter::Open;
+        app.reload();
+        key(&mut app, KeyCode::Char('G'));
+        key(&mut app, KeyCode::Char('k'));
+        assert_eq!(app.selected_id(), Some(3));
+        key(&mut app, KeyCode::Char('s'));
+        key(&mut app, KeyCode::Char('j'));
+        let s = screen(&mut app);
+        assert!(s.contains("delete: remove the draft task"), "{s}");
+        key(&mut app, KeyCode::Enter);
+        let s = screen(&mut app);
+        assert!(s.contains("Delete the draft task 3?"), "{s}");
+        key(&mut app, KeyCode::Char('n'));
+        assert!(app.overlay.is_none());
+        assert!(q.get(3).is_ok());
+
+        key(&mut app, KeyCode::Char('s'));
+        key(&mut app, KeyCode::Char('j'));
+        key(&mut app, KeyCode::Enter);
+        key(&mut app, KeyCode::Char('y'));
+        assert!(app.overlay.is_none());
+        assert!(q.get(3).is_err());
+        assert_eq!(app.selected_id(), Some(4));
+    }
+
+    #[test]
     fn reject_from_review() {
         let (d, q) = demo();
         q.say(1, HUMAN, Kind::Message, "ok").unwrap();

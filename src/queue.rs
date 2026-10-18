@@ -163,8 +163,21 @@ impl Queue {
         Err(usage(format!("task {id} not found")))
     }
 
+    /// The file that holds the highest id of a deleted task, so that a new task
+    /// does not get the id of a deleted task.
+    fn last_deleted_path(&self) -> PathBuf {
+        self.tasks_dir().join(".last-deleted-id")
+    }
+
+    fn last_deleted(&self) -> u32 {
+        fs::read_to_string(self.last_deleted_path())
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0)
+    }
+
     fn next_id(&self) -> u32 {
-        let mut max = 0;
+        let mut max = self.last_deleted();
         for base in [self.tasks_dir(), self.archive_dir()] {
             let Ok(rd) = fs::read_dir(base) else { continue };
             for ent in rd.flatten() {
@@ -323,6 +336,26 @@ impl Queue {
             Entry::new(HUMAN, Kind::Event, "started"),
             |_| {},
         )
+    }
+
+    /// Removes the directory of a `draft` task. Tasks in other statuses cannot be deleted.
+    /// The id of the deleted task is not given to a new task.
+    pub fn delete(&self, id: u32) -> Result<()> {
+        let _lock = self.lock()?;
+        let cur = self.get(id)?;
+        if cur.archived {
+            return Err(conflict(format!("task {id} is archived")));
+        }
+        let st = cur.task.status();
+        if st != Status::Draft {
+            return Err(conflict(format!(
+                "task {id} is {st}; only a draft task can be deleted"
+            )));
+        }
+        if id > self.last_deleted() {
+            write_atomic(&self.last_deleted_path(), &format!("{id}\n"))?;
+        }
+        fs::remove_dir_all(&cur.dir).with_context(|| format!("remove {}", cur.dir.display()))
     }
 
     pub fn submit(&self, id: u32, msg: &str) -> Result<Loaded> {
@@ -582,6 +615,25 @@ mod tests {
         let (tasks, _) = q.load(true).unwrap();
         assert_eq!(ready(&tasks), vec![2]);
         assert_eq!(q.create("Third", |_| {}).unwrap().task.id(), 3);
+    }
+
+    #[test]
+    fn delete_draft_only() {
+        let (_d, q) = queue();
+        q.create("A", |_| {}).unwrap();
+        q.create("B", |_| {}).unwrap();
+        q.start(1).unwrap();
+        let err = q.delete(1).unwrap_err();
+        assert_eq!(err.downcast_ref::<AqError>().unwrap().exit_code(), 2);
+        assert!(q.get(1).is_ok());
+        q.delete(2).unwrap();
+        assert!(q.get(2).is_err());
+        let err = q.delete(2).unwrap_err();
+        assert_eq!(err.downcast_ref::<AqError>().unwrap().exit_code(), 1);
+        let (tasks, bad) = q.load(false).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert!(bad.is_empty());
+        assert_eq!(q.create("C", |_| {}).unwrap().task.id(), 3);
     }
 
     #[test]

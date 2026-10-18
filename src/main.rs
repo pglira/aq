@@ -111,6 +111,8 @@ enum Cmd {
     },
     /// Start a draft task. The task goes to todo, and the agents can claim it.
     Start { id: u32 },
+    /// Delete a draft task. Tasks in other statuses cannot be deleted. The id is not used again.
+    Delete { id: u32 },
     /// Claim a todo task.
     Claim {
         id: u32,
@@ -348,6 +350,10 @@ fn run(cli: Cli) -> Result<()> {
         Cmd::Start { id } => {
             find()?.start(id)?;
             out!("task {id} is todo");
+        }
+        Cmd::Delete { id } => {
+            find()?.delete(id)?;
+            out!("deleted task {id}");
         }
         Cmd::Claim { id, by } => {
             let l = find()?.claim(id, &by)?;

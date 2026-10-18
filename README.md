@@ -19,7 +19,7 @@ You can also use `cargo install --path .`, which installs aq to `~/.cargo/bin`.
 
 1. Run `aq init` in the project root. aq makes `.aq/` with `ORCHESTRATOR.md` and `WORKER.md`.
 2. Write your rules in the `# Policy` sections of `ORCHESTRATOR.md` and `WORKER.md` (TUI keys `O` and `W`).
-3. Start the TUI with `aq` and add tasks (`c`). A new task is in `draft`. The agents do not claim it until you start it with the status menu (`s`) or with `aq start <id>`.
+3. Start the TUI with `aq` and add tasks (`c`). A new task is in `draft`. The agents do not claim it until you start it with the status menu (`s`) or with `aq start <id>`. The status menu can also delete a draft task.
 4. Start the orchestrator in your agent tool with the text of `aq instructions` (TUI key `p` copies it).
 5. Answer the questions of the workers in the chat of each task (`i`). An answer sets a `blocked` task back to `todo`.
 6. Review the tasks in `review` with the status menu (`s`): approve the task, or reject it. To reject, write the review comment in the chat input and press `Enter`.
@@ -44,6 +44,7 @@ aq searches the current directory and its parents for `.aq/`. Use `--dir` or `$A
 | Transition | Who | Command |
 |---|---|---|
 | `draft` → `todo` | human | `aq start <id>` |
+| `draft` → deleted | human | `aq delete <id>` |
 | `todo` → `in_progress` | agent | `aq claim <id> --by <name>` |
 | `in_progress` → `review` | agent | `aq submit <id> -m <summary>` |
 | `in_progress` → `blocked` | agent | `aq ask <id> -m <question>` |
@@ -53,7 +54,7 @@ aq searches the current directory and its parents for `.aq/`. Use `--dir` or `$A
 | `review` → `todo` | human | `aq reject <id> [-m <comment>]` |
 | `in_progress`, `failed` → `todo` | human | `aq retry <id>` |
 
-`aq add` and the TUI make each new task in `draft`. A task is ready when it is `todo` and all its dependencies are `done`. `aq next --all` shows the ready tasks. `aq wait` waits until a task becomes ready or a task leaves `in_progress`.
+`aq add` and the TUI make each new task in `draft`. Only a `draft` task can be deleted; `aq delete` removes its directory, and a new task does not get its id. A task is ready when it is `todo` and all its dependencies are `done`. `aq next --all` shows the ready tasks. `aq wait` waits until a task becomes ready or a task leaves `in_progress`.
 
 Exit codes: `0` success, `1` usage error, `2` conflict, `3` no queue found, `4` timeout of `aq wait`.
 

@@ -660,6 +660,15 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
                 r,
             );
         }
+        Overlay::ConfirmDelete { id } => {
+            let r = centered(area, 50, 5);
+            f.render_widget(Clear, r);
+            f.render_widget(
+                Paragraph::new(format!("Delete the draft task {id}?\n\ny: yes   n: no"))
+                    .block(border(true).title(" delete ")),
+                r,
+            );
+        }
         Overlay::Menu { id, actions, sel } => {
             let r = centered(area, 60, actions.len() as u16 + 4);
             f.render_widget(Clear, r);
@@ -913,7 +922,7 @@ fn help_lines() -> Vec<Line<'static>> {
                 ("e / E", "edit the task in a form / in $EDITOR"),
                 (
                     "s",
-                    "change the status: start, approve, reject, retry, answer",
+                    "change the status: start, delete, approve, reject, retry, answer",
                 ),
                 ("x", "archive the done tasks"),
                 ("p", "copy the start text for the orchestrator"),

@@ -126,6 +126,7 @@ impl Filter {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuAction {
     Start,
+    Delete,
     Approve,
     Reject,
     Retry,
@@ -136,6 +137,7 @@ impl MenuAction {
     pub fn label(self) -> &'static str {
         match self {
             MenuAction::Start => "start: give the task to the agents: draft → todo",
+            MenuAction::Delete => "delete: remove the draft task",
             MenuAction::Approve => "approve: review → done",
             MenuAction::Reject => "reject with a comment: review → todo",
             MenuAction::Retry => "retry: release the claim → todo",
@@ -164,6 +166,9 @@ pub enum Overlay {
         error: String,
     },
     ConfirmArchive,
+    ConfirmDelete {
+        id: u32,
+    },
     Settings {
         sel: Setting,
         /// The one-line edit of the value of the selected setting.
@@ -815,7 +820,10 @@ impl App {
             }
             Status::InProgress | Status::Failed => actions.push(MenuAction::Retry),
             Status::Blocked => actions.push(MenuAction::Answer),
-            Status::Draft => actions.push(MenuAction::Start),
+            Status::Draft => {
+                actions.push(MenuAction::Start);
+                actions.push(MenuAction::Delete);
+            }
             Status::Todo | Status::Done => {}
         }
         if actions.is_empty() {
@@ -833,6 +841,7 @@ impl App {
     fn run_menu(&mut self, id: u32, action: MenuAction) {
         match action {
             MenuAction::Start => self.change_status(id, Queue::start),
+            MenuAction::Delete => self.overlay = Some(Overlay::ConfirmDelete { id }),
             MenuAction::Approve => self.change_status(id, Queue::approve),
             MenuAction::Reject => {
                 self.set_view(View::Chat);
@@ -900,6 +909,19 @@ impl App {
                     let r = q.archive();
                     if let Some(ids) = self.report(r) {
                         self.info(format!("archived {} task(s)", ids.len()));
+                        self.reload();
+                    }
+                }
+                None
+            }
+            Overlay::ConfirmDelete { id } => {
+                if matches!(key.code, KeyCode::Char('y') | KeyCode::Enter)
+                    && let Some(q) = &self.q
+                {
+                    let r = q.delete(id);
+                    self.own_changes.insert(id);
+                    if self.report(r).is_some() {
+                        self.info(format!("deleted task {id}"));
                         self.reload();
                     }
                 }
