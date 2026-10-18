@@ -11,6 +11,10 @@ use crate::templates;
 
 pub const AQ_DIR: &str = ".aq";
 
+/// The format version of the queue that this binary reads and writes. `.aq/version`
+/// holds the version of a queue; a queue without the file has version 1.
+pub const FORMAT_VERSION: u32 = 1;
+
 /// A task with its directory and its chat, as loaded from disk.
 #[derive(Debug, Clone)]
 pub struct Loaded {
@@ -77,9 +81,44 @@ impl Queue {
         Err(AqError::NoQueue.into())
     }
 
+    /// Opens the queue in `root`. A queue with a format version newer than
+    /// [`FORMAT_VERSION`] is an error.
     fn open(root: PathBuf) -> Result<Queue> {
         let root = root.canonicalize().unwrap_or(root);
-        Ok(Queue { root })
+        let q = Queue { root };
+        let version = q.format_version()?;
+        if version > FORMAT_VERSION {
+            anyhow::bail!(
+                "the queue {} has format version {version}, but this aq reads only version {FORMAT_VERSION} or older: install a newer aq",
+                q.root.display()
+            );
+        }
+        Ok(q)
+    }
+
+    fn version_path(&self) -> PathBuf {
+        self.root.join("version")
+    }
+
+    /// The format version in `.aq/version`, or 1 if the file does not exist.
+    pub fn format_version(&self) -> Result<u32> {
+        let path = self.version_path();
+        match fs::read_to_string(&path) {
+            Ok(t) => t
+                .trim()
+                .parse()
+                .with_context(|| format!("{}: the format version is not a number", path.display())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(1),
+            Err(e) => Err(e).with_context(|| format!("read {}", path.display())),
+        }
+    }
+
+    /// Writes `.aq/version` if it does not exist.
+    fn write_version(&self) -> Result<()> {
+        if !self.version_path().exists() {
+            write_atomic(&self.version_path(), &format!("{FORMAT_VERSION}\n"))?;
+        }
+        Ok(())
     }
 
     /// Makes `.aq/` in `project`. Files that exist are not changed.
@@ -96,7 +135,9 @@ impl Queue {
                 fs::write(&path, text)?;
             }
         }
-        Queue::open(root)
+        let q = Queue::open(root)?;
+        q.write_version()?;
+        Ok(q)
     }
 
     pub fn tasks_dir(&self) -> PathBuf {
@@ -487,7 +528,7 @@ impl Queue {
             let old = fs::read_to_string(&path).unwrap_or_default();
             write_atomic(&path, &templates::replace_block(&old, &block))?;
         }
-        Ok(())
+        self.write_version()
     }
 }
 
@@ -671,6 +712,25 @@ mod tests {
     fn unknown_dependency() {
         let (_d, q) = queue();
         assert!(q.create("A", |t| t.meta.depends_on = vec![7]).is_err());
+    }
+
+    #[test]
+    fn format_version() {
+        let (d, q) = queue();
+        assert_eq!(q.format_version().unwrap(), FORMAT_VERSION);
+        fs::remove_file(q.root.join("version")).unwrap();
+        assert_eq!(
+            Queue::find(d.path(), None)
+                .unwrap()
+                .format_version()
+                .unwrap(),
+            1
+        );
+        fs::write(q.root.join("version"), format!("{}\n", FORMAT_VERSION + 1)).unwrap();
+        let err = Queue::find(d.path(), None).unwrap_err();
+        assert!(format!("{err:#}").contains("newer aq"));
+        fs::write(q.root.join("version"), "x").unwrap();
+        assert!(Queue::find(d.path(), None).is_err());
     }
 
     #[test]

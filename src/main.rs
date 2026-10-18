@@ -8,11 +8,11 @@ mod queue_config;
 mod task;
 mod templates;
 mod tui;
+mod wait;
 
-use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -112,11 +112,15 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// Wait until a task becomes ready or a task leaves in_progress.
+    /// Wait for a change in the queue and print the changes: new tasks, deleted tasks,
+    /// status changes other than claims, ready tasks and chat messages of the human.
     Wait {
-        /// Seconds. Exit code 4 on timeout.
+        /// Seconds. Exit code 4 on timeout. `--follow` has no timeout.
         #[arg(long, default_value_t = 540)]
         timeout: u64,
+        /// Print one line per change and do not exit. With `--json`, one JSON object per line.
+        #[arg(long)]
+        follow: bool,
         #[arg(long)]
         json: bool,
     },
@@ -323,13 +327,12 @@ fn run(cli: Cli) -> Result<()> {
                     out!("{}", list_line(l, &tasks));
                 }
             }
-            for (path, err) in bad {
-                eprintln!("aq: skipped {}: {err}", path.display());
-            }
+            wait::report_skipped(&bad);
         }
         Cmd::Next { all, json } => {
             let q = find()?;
-            let (tasks, _) = q.load(true)?;
+            let (tasks, bad) = q.load(true)?;
+            wait::report_skipped(&bad);
             let mut ids = ready(&tasks);
             if !all {
                 ids.truncate(1);
@@ -396,7 +399,11 @@ fn run(cli: Cli) -> Result<()> {
                 print_show(&l, &tasks, chat)?;
             }
         }
-        Cmd::Wait { timeout, json } => wait(&find()?, Duration::from_secs(timeout), json)?,
+        Cmd::Wait {
+            timeout,
+            follow,
+            json,
+        } => wait::wait(&find()?, Duration::from_secs(timeout), json, follow)?,
         Cmd::Start { id } => {
             find()?.start(id)?;
             out!("task {id} is todo");
@@ -669,61 +676,4 @@ fn print_entry(e: &Entry) -> io::Result<()> {
         out!("    {line}");
     }
     Ok(())
-}
-
-#[derive(Serialize)]
-struct Change {
-    id: u32,
-    title: String,
-    from: Option<Status>,
-    to: Status,
-    ready: bool,
-}
-
-/// Polls the queue until a task becomes ready or a task leaves `in_progress`.
-fn wait(q: &Queue, timeout: Duration, json: bool) -> Result<()> {
-    let (start, _) = q.load(true)?;
-    let before: HashMap<u32, Status> = start
-        .iter()
-        .map(|l| (l.task.id(), l.task.status()))
-        .collect();
-    let ready_before: HashSet<u32> = ready(&start).into_iter().collect();
-    let deadline = Instant::now() + timeout;
-    loop {
-        std::thread::sleep(Duration::from_secs(1));
-        let (tasks, _) = q.load(true)?;
-        let ready_now: HashSet<u32> = ready(&tasks).into_iter().collect();
-        let mut changes = Vec::new();
-        for l in &tasks {
-            let id = l.task.id();
-            let old = before.get(&id).copied();
-            let new_ready = ready_now.contains(&id) && !ready_before.contains(&id);
-            let left_progress =
-                old == Some(Status::InProgress) && l.task.status() != Status::InProgress;
-            if new_ready || left_progress {
-                changes.push(Change {
-                    id,
-                    title: l.task.display_title(),
-                    from: old,
-                    to: l.task.status(),
-                    ready: ready_now.contains(&id),
-                });
-            }
-        }
-        if !changes.is_empty() {
-            if json {
-                out!("{}", serde_json::to_string_pretty(&changes)?);
-            } else {
-                for c in changes {
-                    let from = c.from.map_or("new".to_string(), |s| s.to_string());
-                    let ready = if c.ready { " (ready)" } else { "" };
-                    out!("task {}: {from} -> {}{ready}  {}", c.id, c.to, c.title);
-                }
-            }
-            return Ok(());
-        }
-        if Instant::now() >= deadline {
-            return Err(AqError::Timeout.into());
-        }
-    }
 }

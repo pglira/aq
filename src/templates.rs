@@ -16,7 +16,7 @@ You are the orchestrator of an aq task queue. aq is a CLI. Run it from the proje
 - For each ready task, start a subagent. Give it the text of `aq instructions --worker <id>` as its full prompt. The text has all the context that the worker needs. The rules of the project are in the policy section of WORKER.md, not in the prompt.
 - Choose the model for each worker: a cheaper model for a small task, a stronger model for a large or difficult task.
 - Run the subagents in the background when your tool supports it, so that you can dispatch more tasks.
-- Use `aq wait` to wait for a change in the queue. It prints the changes: a task became ready, or a task left `in_progress`. If it times out (exit code 4), run it again.
+- Use `aq wait` to wait for a change in the queue. It prints the changes: a new task, a deleted task, a status change (for example a start, an approval, a rejection or a task that left `in_progress`), a task that became ready, or a chat message of the human. If it times out (exit code 4), run it again. `aq wait --follow` prints one line per change and does not exit; use it for a background monitor.
 - Use `aq list` to see all tasks, and `aq show <id> --brief` to see one task with its last chat entries. Use `aq show <id>` for the full chat.
 - A task can have no title. Then `aq list` shows the first line of the description and `(no title)`. The worker sets the title after the claim.
 - Never set a task to done. A human reviews each task.
