@@ -2,6 +2,7 @@ mod chat;
 mod config;
 mod editor;
 mod error;
+mod hook;
 mod markdown;
 mod queue;
 mod queue_config;
@@ -123,6 +124,22 @@ enum Cmd {
         follow: bool,
         #[arg(long)]
         json: bool,
+        /// Print the changes after the cursor of this consumer, and move the cursor.
+        /// No change is lost between two runs. The first check is immediate.
+        #[arg(long)]
+        consumer: Option<String>,
+        /// The agent session of the consumer, for `aq hook`. Default: `$CLAUDE_CODE_SESSION_ID`.
+        #[arg(long, requires = "consumer")]
+        session: Option<String>,
+    },
+    /// Run as a Claude Code hook: read the hook input on stdin, and give the
+    /// queue changes to the orchestrator session.
+    Hook,
+    /// Add the aq hooks to `.claude/settings.json` of the project.
+    SetupClaude {
+        /// Write `.claude/settings.local.json` instead.
+        #[arg(long)]
+        local: bool,
     },
     /// Start a draft task. The task goes to todo, and the agents can claim it.
     Start { id: u32 },
@@ -403,7 +420,46 @@ fn run(cli: Cli) -> Result<()> {
             timeout,
             follow,
             json,
-        } => wait::wait(&find()?, Duration::from_secs(timeout), json, follow)?,
+            consumer,
+            session,
+        } => {
+            if let Some(name) = &consumer {
+                wait::check_consumer(name)?;
+            }
+            let session = session.or_else(|| {
+                consumer
+                    .as_ref()
+                    .and_then(|_| std::env::var("CLAUDE_CODE_SESSION_ID").ok())
+                    .filter(|s| !s.is_empty())
+            });
+            wait::wait(
+                &find()?,
+                Duration::from_secs(timeout),
+                json,
+                follow,
+                consumer.as_deref(),
+                session.as_deref(),
+            )?
+        }
+        Cmd::Hook => hook::run(cli.dir.as_deref(), &cwd)?,
+        Cmd::SetupClaude { local } => {
+            let name = if local {
+                "settings.local.json"
+            } else {
+                "settings.json"
+            };
+            let path = project_of(&find()?).join(".claude").join(name);
+            let added = hook::install(&path)?;
+            if added.is_empty() {
+                out!("the aq hooks are already in {}", path.display());
+            } else {
+                out!(
+                    "added the aq hooks ({}) to {}",
+                    added.join(", "),
+                    path.display()
+                );
+            }
+        }
         Cmd::Start { id } => {
             find()?.start(id)?;
             out!("task {id} is todo");
