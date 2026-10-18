@@ -17,7 +17,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use serde::Serialize;
 
-use crate::chat::{Entry, HUMAN, Kind};
+use crate::chat::{Entry, HUMAN, Kind, ORCHESTRATOR};
 use crate::error::{AqError, usage};
 use crate::queue::{Loaded, Queue, join_ids, ready, waits_for_deps};
 use crate::task::{PRIORITY_HIGH, PRIORITY_LOW, Status, parse_ids};
@@ -87,7 +87,8 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// Show the ready task with the highest priority.
+    /// Show the ready task with the highest priority, with the count of the
+    /// human messages that the orchestrator has not read.
     Next {
         /// Show all ready tasks.
         #[arg(long)]
@@ -98,6 +99,12 @@ enum Cmd {
     /// Show a task and its chat.
     Show {
         id: u32,
+        /// Show only the last chat entries.
+        #[arg(long)]
+        brief: bool,
+        /// The number of chat entries that `--brief` shows.
+        #[arg(long, default_value_t = 5, requires = "brief")]
+        last: usize,
         #[arg(long)]
         json: bool,
     },
@@ -177,7 +184,8 @@ enum Cmd {
     Retry { id: u32 },
     /// Move the done tasks to .aq/archive/.
     Archive,
-    /// Print the start text for the orchestrator or for a worker.
+    /// Print the start text for the orchestrator or for a worker. The text for a
+    /// worker also gives the queue path and the other tasks in progress.
     Instructions {
         #[arg(long)]
         worker: Option<u32>,
@@ -316,19 +324,46 @@ fn run(cli: Cli) -> Result<()> {
                 .filter_map(|id| tasks.iter().find(|l| l.task.id() == *id))
                 .collect();
             if json {
-                let out: Vec<_> = shown.iter().map(|l| TaskJson::new(l, &tasks)).collect();
+                #[derive(Serialize)]
+                struct Next<'a> {
+                    #[serde(flatten)]
+                    task: TaskJson<'a>,
+                    unread: usize,
+                }
+                let out: Vec<_> = shown
+                    .iter()
+                    .map(|l| Next {
+                        task: TaskJson::new(l, &tasks),
+                        unread: unread_human(l),
+                    })
+                    .collect();
                 out!("{}", serde_json::to_string_pretty(&out)?);
             } else if shown.is_empty() {
                 out!("no task is ready");
             } else {
                 for l in shown {
-                    out!("{}", list_line(l, &tasks));
+                    let mut line = list_line(l, &tasks);
+                    let n = unread_human(l);
+                    if n > 0 {
+                        line.push_str(&format!("  ({n} unread)"));
+                    }
+                    out!("{line}");
                 }
             }
         }
-        Cmd::Show { id, json } => {
+        Cmd::Show {
+            id,
+            brief,
+            last,
+            json,
+        } => {
             let q = find()?;
             let l = q.get(id)?;
+            let chat = if brief {
+                &l.chat[l.chat.len().saturating_sub(last)..]
+            } else {
+                &l.chat[..]
+            };
             let (tasks, _) = q.load(true)?;
             if json {
                 #[derive(Serialize)]
@@ -339,11 +374,11 @@ fn run(cli: Cli) -> Result<()> {
                 }
                 let out = Show {
                     task: TaskJson::new(&l, &tasks),
-                    chat: &l.chat,
+                    chat,
                 };
                 out!("{}", serde_json::to_string_pretty(&out)?);
             } else {
-                print_show(&l, &tasks)?;
+                print_show(&l, &tasks, chat)?;
             }
         }
         Cmd::Wait { timeout, json } => wait(&find()?, Duration::from_secs(timeout), json)?,
@@ -437,8 +472,20 @@ fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Instructions { worker } => match worker {
             Some(id) => {
-                find()?.get(id)?;
-                out!("{}", templates::worker_start(id));
+                let q = find()?;
+                q.get(id)?;
+                let root = std::path::absolute(&q.root)?;
+                let (tasks, _) = q.load(false)?;
+                let others: Vec<templates::Running> = tasks
+                    .iter()
+                    .filter(|l| l.task.id() != id && l.task.status() == Status::InProgress)
+                    .map(|l| templates::Running {
+                        id: l.task.id(),
+                        title: l.task.display_title(),
+                        assignee: l.task.meta.assignee.clone().unwrap_or_else(|| "?".into()),
+                    })
+                    .collect();
+                out!("{}", templates::worker_start(id, &root, &others));
             }
             None => out!("{}", templates::orchestrator_start()),
         },
@@ -499,7 +546,13 @@ fn list_line(l: &Loaded, all: &[Loaded]) -> String {
     line
 }
 
-fn print_show(l: &Loaded, all: &[Loaded]) -> io::Result<()> {
+/// The number of human messages in the chat of `l` that the orchestrator has not read.
+fn unread_human(l: &Loaded) -> usize {
+    chat::unread_human(&l.chat, &chat::read_marks(&l.marks_path()), ORCHESTRATOR)
+}
+
+/// Prints a task with the chat entries `chat`, the last part of the chat of `l`.
+fn print_show(l: &Loaded, all: &[Loaded], chat: &[Entry]) -> io::Result<()> {
     let m = &l.task.meta;
     if l.task.has_title() {
         out!("# {} {}", m.id, m.title);
@@ -526,7 +579,11 @@ fn print_show(l: &Loaded, all: &[Loaded]) -> io::Result<()> {
         out!("\n## Acceptance\n\n{}", l.task.acceptance);
     }
     out!("\n## Chat\n");
-    for e in &l.chat {
+    let earlier = l.chat.len() - chat.len();
+    if earlier > 0 {
+        out!("({earlier} earlier entries; `aq show {}` shows all)", m.id);
+    }
+    for e in chat {
         print_entry(e)?;
     }
     Ok(())

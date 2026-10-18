@@ -11,6 +11,8 @@ use crate::task::now;
 
 pub const HUMAN: &str = "human";
 pub const AQ: &str = "aq";
+/// The reader name of the orchestrator for the read marks.
+pub const ORCHESTRATOR: &str = "orchestrator";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -114,9 +116,30 @@ pub fn unread<'a>(
         .filter(move |e| e.from != reader && e.kind != Kind::Event)
 }
 
+/// The number of human messages after the read mark of `reader`. Events do not count.
+pub fn unread_human(entries: &[Entry], marks: &BTreeMap<String, usize>, reader: &str) -> usize {
+    unread(entries, marks, reader)
+        .filter(|e| e.from == HUMAN)
+        .count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unread_human_counts_after_mark() {
+        let entries = vec![
+            Entry::new(HUMAN, Kind::Message, "a"),
+            Entry::new("worker-1", Kind::Log, "b"),
+            Entry::new(HUMAN, Kind::Event, "started"),
+            Entry::new(HUMAN, Kind::Review, "c"),
+        ];
+        let mut marks = BTreeMap::new();
+        assert_eq!(unread_human(&entries, &marks, ORCHESTRATOR), 2);
+        marks.insert(ORCHESTRATOR.to_string(), 1);
+        assert_eq!(unread_human(&entries, &marks, ORCHESTRATOR), 1);
+    }
 
     #[test]
     fn unknown_keys_are_ignored() {

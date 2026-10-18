@@ -20,7 +20,7 @@ You can also use `cargo install --path .`, which installs aq to `~/.cargo/bin`.
 1. Run `aq init` in the project root. aq makes `.aq/` with `ORCHESTRATOR.md` and `WORKER.md`.
 2. Write your rules in the `# Policy` sections of `ORCHESTRATOR.md` and `WORKER.md` (TUI keys `O` and `W`).
 3. Start the TUI with `aq` and add tasks (`c`). A new task is in `draft`. The agents do not claim it until you start it with the status menu (`s`) or with `aq start <id>`. The status menu can also delete a draft task.
-4. Start the orchestrator in your agent tool with the text of `aq instructions` (TUI key `p` copies it).
+4. Start the orchestrator in your agent tool with the text of `aq instructions` (TUI key `p` copies it). The orchestrator gives each worker the text of `aq instructions --worker <id>`: the start text, the path of the queue for `AQ_DIR` (for a worker in a git worktree), and the other tasks in progress.
 5. Answer the questions of the workers in the chat of each task (`i`). An answer sets a `blocked` task back to `todo`.
 6. Review the tasks in `review` with the status menu (`s`): approve the task, or reject it. To reject, write the review comment in the chat input and press `Enter`.
 
@@ -54,7 +54,7 @@ aq searches the current directory and its parents for `.aq/`. Use `--dir` or `$A
 | `review` → `todo` | human | `aq reject <id> [-m <comment>]` |
 | `in_progress`, `failed` → `todo` | human | `aq retry <id>` |
 
-`aq add` and the TUI make each new task in `draft`. Only a `draft` task can be deleted; `aq delete` removes its directory, and a new task does not get its id. A task is ready when it is `todo` and all its dependencies are `done`. `aq next --all` shows the ready tasks. `aq wait` waits until a task becomes ready or a task leaves `in_progress`.
+`aq add` and the TUI make each new task in `draft`. Only a `draft` task can be deleted; `aq delete` removes its directory, and a new task does not get its id. A task is ready when it is `todo` and all its dependencies are `done`. `aq next --all` shows the ready tasks, with the count of the human messages that the orchestrator has not read (`(N unread)`; `aq chat <id> --unread --by orchestrator` reads them). `aq show <id> --brief` shows the fields, the description and the last 5 chat entries (`--last <n>` sets the number). `aq wait` waits until a task becomes ready or a task leaves `in_progress`.
 
 Exit codes: `0` success, `1` usage error, `2` conflict, `3` no queue found, `4` timeout of `aq wait`.
 
