@@ -12,7 +12,7 @@ You are the orchestrator of an aq task queue. aq is a CLI. Run it from the proje
 - A new task is in `draft`. A draft task is not ready. Only the human starts it (`draft` → `todo`). Never start or dispatch a draft task.
 - For each ready task, start a subagent. Give it the text of `aq instructions --worker <id>` as its prompt.
 - Run the subagents in the background when your tool supports it, so that you can dispatch more tasks.
-- Use `aq wait` to wait for a change in the queue. It prints the changes: a task became ready, or a task left `in_progress`. If it times out (exit code 4), run it again.
+- Use `aq wait` to wait for a change in the queue. It prints the changes: a new task, a deleted task, a status change (for example a start, an approval, a rejection or a task that left `in_progress`), a task that became ready, or a chat message of the human. If it times out (exit code 4), run it again. `aq wait --follow` prints one line per change and does not exit; use it for a background monitor.
 - Use `aq list` to see all tasks, and `aq show <id>` to see one task with its chat.
 - A task can have no title. Then `aq list` shows the first line of the description and `(no title)`. The worker sets the title after the claim.
 - Never set a task to done. A human reviews each task.

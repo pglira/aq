@@ -54,7 +54,9 @@ aq searches the current directory and its parents for `.aq/`. Use `--dir` or `$A
 | `review` → `todo` | human | `aq reject <id> [-m <comment>]` |
 | `in_progress`, `failed` → `todo` | human | `aq retry <id>` |
 
-`aq add` and the TUI make each new task in `draft`. Only a `draft` task can be deleted; `aq delete` removes its directory, and a new task does not get its id. A task is ready when it is `todo` and all its dependencies are `done`. `aq next --all` shows the ready tasks. `aq wait` waits until a task becomes ready or a task leaves `in_progress`.
+`aq add` and the TUI make each new task in `draft`. Only a `draft` task can be deleted; `aq delete` removes its directory, and a new task does not get its id. A task is ready when it is `todo` and all its dependencies are `done`. `aq next --all` shows the ready tasks. `aq wait` waits for a change in the queue and prints the changes: a new task, a deleted task, a status change other than a claim, a task that became ready, and a chat message of the human. These include the actions of the human in the TUI. `aq wait --follow` prints one line per change and does not exit. `aq list`, `aq next` and `aq wait` write the task files that do not parse to stderr.
+
+`.aq/version` holds the format version of the queue. An aq that is older than the queue stops with an error.
 
 Exit codes: `0` success, `1` usage error, `2` conflict, `3` no queue found, `4` timeout of `aq wait`.
 
