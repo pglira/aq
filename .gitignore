@@ -1,0 +1,5 @@
+/target
+/.aq/tasks/
+/.aq/archive/
+/.aq/.lock
+/.galley/

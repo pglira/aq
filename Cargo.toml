@@ -1,0 +1,25 @@
+[package]
+name = "aq"
+version = "0.1.0"
+edition = "2024"
+description = "Agent queue: a task queue with a TUI and a CLI for coding agents"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+notify = "7"
+open = "5"
+pulldown-cmark = { version = "0.13", default-features = false }
+ratatui = "0.29"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+syntect = { version = "5", default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy"] }
+tempfile = "3"
+toml = "0.8"
+thiserror = "2"
+tui-textarea = "0.7"
+unicode-width = "0.2"
