@@ -177,7 +177,7 @@ impl Queue {
         max + 1
     }
 
-    /// Makes a new task. `edit` changes the task before it is written; the id is set.
+    /// Makes a new task in `draft`. `edit` changes the task before it is written; the id is set.
     /// The directory name is `<id>-<slug>`, with the slug from the title, else from
     /// the first line of the description. The name does not change afterward.
     pub fn create(&self, title: &str, edit: impl FnOnce(&mut Task)) -> Result<Loaded> {
@@ -311,6 +311,17 @@ impl Queue {
                 t.meta.assignee = Some(by.clone());
                 t.meta.claimed_at = Some(now());
             },
+        )
+    }
+
+    /// Releases a `draft` task to the agents: `draft` → `todo`.
+    pub fn start(&self, id: u32) -> Result<Loaded> {
+        self.transition(
+            id,
+            &[Status::Draft],
+            Status::Todo,
+            Entry::new(HUMAN, Kind::Event, "started"),
+            |_| {},
         )
     }
 
@@ -528,6 +539,18 @@ mod tests {
         let b = q.create("Second", |t| t.meta.depends_on = vec![1]).unwrap();
         assert_eq!(a.task.id(), 1);
         assert_eq!(b.task.id(), 2);
+        assert_eq!(a.task.status(), Status::Draft);
+        let (tasks, _) = q.load(false).unwrap();
+        assert!(ready(&tasks).is_empty());
+        let err = q.claim(1, "w").unwrap_err();
+        assert_eq!(err.downcast_ref::<AqError>().unwrap().exit_code(), 2);
+
+        let l = q.start(1).unwrap();
+        assert_eq!(l.task.status(), Status::Todo);
+        assert_eq!(l.chat.last().unwrap().text, "started");
+        q.start(2).unwrap();
+        let err = q.start(1).unwrap_err();
+        assert_eq!(err.downcast_ref::<AqError>().unwrap().exit_code(), 2);
         let (tasks, _) = q.load(false).unwrap();
         assert_eq!(ready(&tasks), vec![1]);
 
@@ -566,6 +589,8 @@ mod tests {
         let (_d, q) = queue();
         q.create("A", |_| {}).unwrap();
         q.create("B", |t| t.meta.depends_on = vec![1]).unwrap();
+        q.start(1).unwrap();
+        q.start(2).unwrap();
         q.claim(1, "w").unwrap();
         q.fail(1, "no").unwrap();
         let (tasks, _) = q.load(false).unwrap();

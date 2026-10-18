@@ -83,6 +83,7 @@ fn status_symbol(s: Status, waits: bool) -> (&'static str, Color) {
         return ("⧗", DIM);
     }
     let sym = match s {
+        Status::Draft => "·",
         Status::Todo => "○",
         Status::InProgress => "◔",
         Status::Blocked => "?",
@@ -95,6 +96,7 @@ fn status_symbol(s: Status, waits: bool) -> (&'static str, Color) {
 
 fn status_color(s: Status) -> Color {
     match s {
+        Status::Draft => DIM,
         Status::Todo => Color::White,
         Status::InProgress => Color::Blue,
         Status::Blocked => Color::Yellow,
@@ -909,7 +911,10 @@ fn help_lines() -> Vec<Line<'static>> {
                 ("i", "write in the chat of the task"),
                 ("c", "new task"),
                 ("e / E", "edit the task in a form / in $EDITOR"),
-                ("s", "change the status: approve, reject, retry, answer"),
+                (
+                    "s",
+                    "change the status: start, approve, reject, retry, answer",
+                ),
                 ("x", "archive the done tasks"),
                 ("p", "copy the start text for the orchestrator"),
                 ("O / W", "edit ORCHESTRATOR.md / WORKER.md in $EDITOR"),

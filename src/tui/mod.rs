@@ -181,6 +181,8 @@ mod tests {
         .unwrap();
         q.create("Fix cache", |t| t.meta.depends_on = vec![1])
             .unwrap();
+        q.start(1).unwrap();
+        q.start(2).unwrap();
         q.claim(1, "worker-1").unwrap();
         q.ask(1, "Use OAuth or [passwords]{.red}?").unwrap();
         (d, q)
@@ -393,6 +395,25 @@ mod tests {
         let l = q.get(1).unwrap();
         assert_eq!(l.task.status(), Status::Review);
         assert_eq!(l.chat.last().unwrap().kind, Kind::Message);
+    }
+
+    #[test]
+    fn menu_starts_draft() {
+        let (d, q) = demo();
+        q.create("Draft task", |_| {}).unwrap();
+        let mut app = App::new(Some(q.clone()), d.path().to_path_buf(), None);
+        app.filter = Filter::Open;
+        let s = screen(&mut app);
+        assert!(s.contains("Draft task"), "{s}");
+        key(&mut app, KeyCode::Char('G'));
+        key(&mut app, KeyCode::Char('s'));
+        let s = screen(&mut app);
+        assert!(s.contains("start: give the task to the agents"), "{s}");
+        key(&mut app, KeyCode::Enter);
+        assert!(app.overlay.is_none());
+        let l = q.get(3).unwrap();
+        assert_eq!(l.task.status(), Status::Todo);
+        assert_eq!(l.chat.last().unwrap().text, "started");
     }
 
     #[test]

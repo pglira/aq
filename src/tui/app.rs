@@ -125,6 +125,7 @@ impl Filter {
 /// A human status change that the status menu offers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuAction {
+    Start,
     Approve,
     Reject,
     Retry,
@@ -134,6 +135,7 @@ pub enum MenuAction {
 impl MenuAction {
     pub fn label(self) -> &'static str {
         match self {
+            MenuAction::Start => "start: give the task to the agents: draft → todo",
             MenuAction::Approve => "approve: review → done",
             MenuAction::Reject => "reject with a comment: review → todo",
             MenuAction::Retry => "retry: release the claim → todo",
@@ -813,6 +815,7 @@ impl App {
             }
             Status::InProgress | Status::Failed => actions.push(MenuAction::Retry),
             Status::Blocked => actions.push(MenuAction::Answer),
+            Status::Draft => actions.push(MenuAction::Start),
             Status::Todo | Status::Done => {}
         }
         if actions.is_empty() {
@@ -829,6 +832,7 @@ impl App {
 
     fn run_menu(&mut self, id: u32, action: MenuAction) {
         match action {
+            MenuAction::Start => self.change_status(id, Queue::start),
             MenuAction::Approve => self.change_status(id, Queue::approve),
             MenuAction::Reject => {
                 self.set_view(View::Chat);

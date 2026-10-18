@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
+    /// A new task. Agents do not pick it up until the human starts it.
+    Draft,
     Todo,
     InProgress,
     Blocked,
@@ -17,7 +19,8 @@ pub enum Status {
 }
 
 impl Status {
-    pub const ALL: [Status; 6] = [
+    pub const ALL: [Status; 7] = [
+        Status::Draft,
         Status::Todo,
         Status::InProgress,
         Status::Blocked,
@@ -28,6 +31,7 @@ impl Status {
 
     pub fn as_str(self) -> &'static str {
         match self {
+            Status::Draft => "draft",
             Status::Todo => "todo",
             Status::InProgress => "in_progress",
             Status::Blocked => "blocked",
@@ -103,7 +107,7 @@ impl Task {
             meta: Meta {
                 id,
                 title: title.to_string(),
-                status: Status::Todo,
+                status: Status::Draft,
                 priority: PRIORITY_DEFAULT,
                 depends_on: Vec::new(),
                 assignee: None,

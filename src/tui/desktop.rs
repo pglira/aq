@@ -75,6 +75,7 @@ mod tests {
         let none = HashSet::new();
         assert!(status_changes(&before, &tasks, &none).is_empty());
         for id in [1, 2, 3] {
+            q.start(id).unwrap();
             q.claim(id, "w").unwrap();
         }
         q.create("New", |t| t.meta.status = Status::Review).unwrap();

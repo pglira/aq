@@ -52,7 +52,7 @@ enum Cmd {
         #[arg(long)]
         update_agent: bool,
     },
-    /// Make a task. It needs a title or a description.
+    /// Make a task in draft. It needs a title or a description. `aq start` gives it to the agents.
     Add {
         /// A short title. Without it, an agent sets the title later with `aq title`.
         title: Option<String>,
@@ -109,6 +109,8 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Start a draft task. The task goes to todo, and the agents can claim it.
+    Start { id: u32 },
     /// Claim a todo task.
     Claim {
         id: u32,
@@ -262,7 +264,11 @@ fn run(cli: Cli) -> Result<()> {
                 t.meta.depends_on = deps;
                 t.description = description.unwrap_or_default();
             })?;
-            out!("added task {}: {}", l.task.id(), l.task.display_title());
+            out!(
+                "added task {} (draft): {}",
+                l.task.id(),
+                l.task.display_title()
+            );
             if edit {
                 editor::edit_task_cli(&q, l.task.id())?;
             }
@@ -339,6 +345,10 @@ fn run(cli: Cli) -> Result<()> {
             }
         }
         Cmd::Wait { timeout, json } => wait(&find()?, Duration::from_secs(timeout), json)?,
+        Cmd::Start { id } => {
+            find()?.start(id)?;
+            out!("task {id} is todo");
+        }
         Cmd::Claim { id, by } => {
             let l = find()?.claim(id, &by)?;
             out!("{by} claimed task {id}: {}", l.task.display_title());
