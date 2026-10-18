@@ -69,12 +69,13 @@ Press `?` in the TUI for all keys. The navigation uses vim keys (`j`, `k`, `g`, 
 Press `,` in the TUI to open the settings. Each change saves at once to `$XDG_CONFIG_HOME/aq/config.toml`, or to `~/.config/aq/config.toml` if `$XDG_CONFIG_HOME` is not set. A missing file gives the defaults. If the file is not valid, the TUI shows an error in the footer, uses the defaults, and does not overwrite the file.
 
 ```toml
-list_width = 40      # the width of the task list in columns; no value: automatic
-editor = "nvim -p"   # the editor command; no value: $VISUAL, else $EDITOR, else vi
-notifications = true # desktop notifications of status changes; no value: off
+list_width = 40        # the width of the task list in columns; no value: automatic
+list_filter = "review" # the filter of the task list at start: open, review, blocked, all, done; no value: open
+editor = "nvim -p"     # the editor command; no value: $VISUAL, else $EDITOR, else vi
+notifications = true   # desktop notifications of status changes; no value: off
 ```
 
-In the settings, `j` and `k` select a setting, `h` and `l` change the list width or switch the notifications on and off, `Enter` edits the value or switches the notifications, `d` sets the default, and `Esc` closes. A mouse drag of the list border also saves the list width. The editor setting applies to the TUI and to the CLI (`aq edit`, `aq add --edit`, `aq reject`). If the notifications are on, the TUI runs `notify-send` when an agent or another process changes the status of a task, for example `aq: #3 Fix cache → review`. The TUI sends no notification for the changes that you make in the TUI, and no notification at start. The CLI sends no notifications.
+In the settings, `j` and `k` select a setting. `h` and `l` change the list width, cycle the list filter, or switch the notifications on and off. `Space` and `Enter` cycle the list filter and switch the notifications. `Enter` edits the list width and the editor. `d` sets the default, and `Esc` closes. The list filter sets the filter of the task list when the TUI starts; `f` changes the filter while the TUI runs. A mouse drag of the list border also saves the list width. The editor setting applies to the TUI and to the CLI (`aq edit`, `aq add --edit`, `aq reject`). If the notifications are on, the TUI runs `notify-send` when an agent or another process changes the status of a task, for example `aq: #3 Fix cache → review`. The TUI sends no notification for the changes that you make in the TUI, and no notification at start. The CLI sends no notifications.
 
 ## Tests
 

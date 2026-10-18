@@ -11,7 +11,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use tui_textarea::TextArea;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use super::app::{App, Focus, Overlay, Setting, View, clamp_list_width};
+use super::app::{App, Filter, Focus, Overlay, Setting, View, clamp_list_width};
 use super::form::{Field, Form};
 use crate::chat::{AQ, Entry, HUMAN, Kind};
 use crate::markdown;
@@ -725,6 +725,10 @@ fn setting_value(app: &App, s: Setting) -> Span<'static> {
             Some(w) => Span::raw(format!("{w} columns")),
             None => Span::styled(format!("auto ({} columns)", app.list_drawn), dim),
         },
+        Setting::ListFilter if app.config.list_filter == Filter::default() => {
+            Span::styled(app.config.list_filter.name(), dim)
+        }
+        Setting::ListFilter => Span::raw(app.config.list_filter.name()),
         Setting::Editor if app.config.editor.is_empty() => {
             let cmd = crate::editor::resolve(
                 "",
@@ -909,7 +913,10 @@ fn help_lines() -> Vec<Line<'static>> {
                 ("x", "archive the done tasks"),
                 ("p", "copy the start text for the orchestrator"),
                 ("O / W", "edit ORCHESTRATOR.md / WORKER.md in $EDITOR"),
-                (",", "settings: list width, editor, notifications"),
+                (
+                    ",",
+                    "settings: list width, list filter, editor, notifications",
+                ),
                 ("q", "quit"),
             ],
         ),

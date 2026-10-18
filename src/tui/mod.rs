@@ -28,6 +28,7 @@ use ratatui::crossterm::terminal::{
 
 use crate::queue::Queue;
 use app::App;
+pub(crate) use app::Filter;
 
 type Term = Terminal<CrosstermBackend<Stdout>>;
 
@@ -439,6 +440,28 @@ mod tests {
         let saved = crate::config::load(&cfg).unwrap();
         assert_eq!(saved.list_width, Some(auto + 1));
         key(&mut app, KeyCode::Char('j'));
+        key(&mut app, KeyCode::Char('l'));
+        assert_eq!(
+            crate::config::load(&cfg).unwrap().list_filter,
+            Filter::Review
+        );
+        key(&mut app, KeyCode::Enter);
+        key(&mut app, KeyCode::Char(' '));
+        assert_eq!(crate::config::load(&cfg).unwrap().list_filter, Filter::All);
+        key(&mut app, KeyCode::Char('h'));
+        assert_eq!(
+            crate::config::load(&cfg).unwrap().list_filter,
+            Filter::Blocked
+        );
+        let s = screen(&mut app);
+        assert!(s.contains("List filter"), "{s}");
+        assert!(s.contains("blocked"), "{s}");
+        assert_eq!(app.filter, Filter::Open);
+        key(&mut app, KeyCode::Char('d'));
+        assert_eq!(crate::config::load(&cfg).unwrap().list_filter, Filter::Open);
+        key(&mut app, KeyCode::Char('h'));
+        assert_eq!(crate::config::load(&cfg).unwrap().list_filter, Filter::Done);
+        key(&mut app, KeyCode::Char('j'));
         key(&mut app, KeyCode::Enter);
         typ(&mut app, "nvim -p");
         key(&mut app, KeyCode::Enter);
@@ -455,6 +478,7 @@ mod tests {
         assert!(!crate::config::load(&cfg).unwrap().notifications);
         key(&mut app, KeyCode::Char('k'));
         key(&mut app, KeyCode::Char('k'));
+        key(&mut app, KeyCode::Char('k'));
         key(&mut app, KeyCode::Enter);
         app.on_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
         typ(&mut app, "40");
@@ -467,6 +491,30 @@ mod tests {
 
         let again = App::new(None, d.path().to_path_buf(), Some(cfg));
         assert_eq!(again.config.list_width, Some(40));
+        assert_eq!(again.filter, Filter::Done);
+    }
+
+    #[test]
+    fn list_filter_setting_sets_the_start_filter() {
+        let (d, q) = demo();
+        let cfg = d.path().join("config.toml");
+        std::fs::write(&cfg, "list_filter = \"review\"\n").unwrap();
+        let mut app = App::new(Some(q), d.path().to_path_buf(), Some(cfg.clone()));
+        assert_eq!(app.filter, Filter::Review);
+        assert!(
+            app.visible
+                .iter()
+                .all(|i| app.tasks[*i].task.status() == Status::Review)
+        );
+        key(&mut app, KeyCode::Char(','));
+        key(&mut app, KeyCode::Esc);
+        assert_eq!(app.filter, Filter::Review);
+
+        std::fs::write(&cfg, "list_filter = \"todo\"\n").unwrap();
+        let mut app = App::new(None, d.path().to_path_buf(), Some(cfg));
+        assert_eq!(app.filter, Filter::Open);
+        let s = screen(&mut app);
+        assert!(s.contains("list_filter"), "{s}");
     }
 
     #[test]

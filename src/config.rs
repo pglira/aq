@@ -9,9 +9,12 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use crate::queue::write_atomic;
+use crate::tui::Filter;
 
 /// The key of the width of the task list, in columns.
 const LIST_WIDTH: &str = "list_width";
+/// The key of the filter of the task list at the start of the TUI.
+const LIST_FILTER: &str = "list_filter";
 /// The key of the editor command.
 const EDITOR: &str = "editor";
 /// The key of the switch for desktop notifications.
@@ -21,6 +24,8 @@ const NOTIFICATIONS: &str = "notifications";
 pub struct Config {
     /// The width of the task list in columns. `None` uses the automatic width.
     pub list_width: Option<u16>,
+    /// The filter of the task list at the start of the TUI.
+    pub list_filter: Filter,
     /// The command that edits a file. An empty command uses `$VISUAL`, else
     /// `$EDITOR`, else `vi`.
     pub editor: String,
@@ -81,6 +86,13 @@ fn parse(t: &toml::Table) -> Result<Config> {
             )
         }
     };
+    let list_filter = match t.get(LIST_FILTER) {
+        None => Filter::default(),
+        Some(v) => v.as_str().and_then(Filter::from_name).with_context(|| {
+            let names: Vec<_> = Filter::CYCLE.iter().map(|f| f.name()).collect();
+            format!("`{LIST_FILTER}` must be one of {}", names.join(", "))
+        })?,
+    };
     let editor = match t.get(EDITOR) {
         None => String::new(),
         Some(v) => v
@@ -97,6 +109,7 @@ fn parse(t: &toml::Table) -> Result<Config> {
     };
     Ok(Config {
         list_width,
+        list_filter,
         editor,
         notifications,
     })
@@ -110,6 +123,14 @@ pub fn save(path: &Path, cfg: &Config) -> Result<()> {
         Some(w) => table.insert(LIST_WIDTH.into(), toml::Value::Integer(w.into())),
         None => table.remove(LIST_WIDTH),
     };
+    if cfg.list_filter == Filter::default() {
+        table.remove(LIST_FILTER);
+    } else {
+        table.insert(
+            LIST_FILTER.into(),
+            toml::Value::String(cfg.list_filter.name().into()),
+        );
+    }
     if cfg.editor.trim().is_empty() {
         table.remove(EDITOR);
     } else {
@@ -153,16 +174,24 @@ mod tests {
         let path = d.path().join("aq/config.toml");
         let cfg = Config {
             list_width: Some(40),
+            list_filter: Filter::Review,
             editor: "nvim -p".into(),
             notifications: true,
         };
         save(&path, &cfg).unwrap();
         assert_eq!(load(&path).unwrap(), cfg);
-        fs::write(&path, "future = true\nlist_width = 30\n").unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("list_filter = \"review\""), "{text}");
+        fs::write(
+            &path,
+            "future = true\nlist_width = 30\nlist_filter = \"all\"\n",
+        )
+        .unwrap();
         save(&path, &Config::default()).unwrap();
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.contains("future = true"), "{text}");
         assert!(!text.contains("list_width"), "{text}");
+        assert!(!text.contains("list_filter"), "{text}");
         assert_eq!(load(&path).unwrap(), Config::default());
     }
 
@@ -178,6 +207,12 @@ mod tests {
         fs::write(&path, "notifications = 1\n").unwrap();
         let e = format!("{:#}", load(&path).unwrap_err());
         assert!(e.contains("notifications"), "{e}");
+        fs::write(&path, "list_filter = \"todo\"\n").unwrap();
+        let e = format!("{:#}", load(&path).unwrap_err());
+        assert!(e.contains("list_filter"), "{e}");
+        assert!(e.contains("open, review, blocked, all, done"), "{e}");
+        fs::write(&path, "list_filter = 1\n").unwrap();
+        assert!(load(&path).is_err());
         fs::write(&path, "not toml [").unwrap();
         assert!(load(&path).is_err());
     }

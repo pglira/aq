@@ -64,8 +64,11 @@ pub enum Focus {
     Input,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The set of tasks that the task list shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Filter {
+    /// All tasks that are not done.
+    #[default]
     Open,
     Review,
     Blocked,
@@ -74,7 +77,7 @@ pub enum Filter {
 }
 
 impl Filter {
-    const CYCLE: [Filter; 5] = [
+    pub const CYCLE: [Filter; 5] = [
         Filter::Open,
         Filter::Review,
         Filter::Blocked,
@@ -92,6 +95,11 @@ impl Filter {
         }
     }
 
+    /// The filter with the name `name`, as `name()` gives it.
+    pub fn from_name(name: &str) -> Option<Filter> {
+        Filter::CYCLE.into_iter().find(|f| f.name() == name)
+    }
+
     fn matches(self, s: Status) -> bool {
         match self {
             Filter::Open => s != Status::Done,
@@ -105,6 +113,12 @@ impl Filter {
     fn next(self) -> Filter {
         let i = Filter::CYCLE.iter().position(|f| *f == self).unwrap_or(0);
         Filter::CYCLE[(i + 1) % Filter::CYCLE.len()]
+    }
+
+    fn prev(self) -> Filter {
+        let n = Filter::CYCLE.len();
+        let i = Filter::CYCLE.iter().position(|f| *f == self).unwrap_or(0);
+        Filter::CYCLE[(i + n - 1) % n]
     }
 }
 
@@ -159,16 +173,23 @@ pub enum Overlay {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Setting {
     ListWidth,
+    ListFilter,
     Editor,
     Notifications,
 }
 
 impl Setting {
-    pub const ALL: [Setting; 3] = [Setting::ListWidth, Setting::Editor, Setting::Notifications];
+    pub const ALL: [Setting; 4] = [
+        Setting::ListWidth,
+        Setting::ListFilter,
+        Setting::Editor,
+        Setting::Notifications,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
             Setting::ListWidth => "List width",
+            Setting::ListFilter => "List filter",
             Setting::Editor => "Editor",
             Setting::Notifications => "Notifications",
         }
@@ -279,6 +300,7 @@ impl App {
             quit: false,
         };
         app.load_config();
+        app.filter = app.config.list_filter;
         app.reload();
         app
     }
@@ -971,7 +993,7 @@ impl App {
                             self.config.editor = text;
                             self.save_config();
                         }
-                        Setting::Notifications => {}
+                        Setting::ListFilter | Setting::Notifications => {}
                     }
                 }
                 _ => {
@@ -1013,11 +1035,25 @@ impl App {
                     self.config.editor.clear();
                     self.save_config();
                 }
+                Setting::ListFilter => {
+                    self.config.list_filter = Filter::default();
+                    self.save_config();
+                }
                 Setting::Notifications => {
                     self.config.notifications = false;
                     self.save_config();
                 }
             },
+            KeyCode::Char('h') | KeyCode::Left if sel == Setting::ListFilter => {
+                self.config.list_filter = self.config.list_filter.prev();
+                self.save_config();
+            }
+            KeyCode::Char('l' | ' ') | KeyCode::Right | KeyCode::Enter
+                if sel == Setting::ListFilter =>
+            {
+                self.config.list_filter = self.config.list_filter.next();
+                self.save_config();
+            }
             KeyCode::Char('h' | 'l' | ' ') | KeyCode::Left | KeyCode::Right | KeyCode::Enter
                 if sel == Setting::Notifications =>
             {
@@ -1032,7 +1068,9 @@ impl App {
                         .map(|w| w.to_string())
                         .unwrap_or_default(),
                     Setting::Editor => self.config.editor.clone(),
-                    Setting::Notifications => unreachable!("Enter toggles notifications"),
+                    Setting::ListFilter | Setting::Notifications => {
+                        unreachable!("Enter cycles the filter and toggles the notifications")
+                    }
                 };
                 return Some(Overlay::Settings {
                     sel,
