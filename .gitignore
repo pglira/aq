@@ -1,8 +1,4 @@
 /target
-/.aq/tasks/
-/.aq/archive/
-/.aq/.lock
+/.aq/
 /.galley/
-/.aq/ORCHESTRATOR.md
-/.aq/WORKER.md
 /.claude/
